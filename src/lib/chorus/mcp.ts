@@ -2,7 +2,7 @@ import { LABS } from "./labs.ts";
 import { examFor, gradeArtifact } from "./grade.ts";
 import { dropSession, recordScore, sittingFor, sittingPairs, sittingSnapshot, sittingToRun } from "./mcp-sitting.ts";
 
-export const MCP_PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-11-25", "2026-07-28"] as const;
+export const MCP_PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"] as const;
 
 export function negotiateProtocol(requested?: string) {
   if (requested && (MCP_PROTOCOLS as readonly string[]).includes(requested)) return requested;
@@ -49,7 +49,7 @@ const TOOLS = [
   {
     name: "chorus_labs",
     description: "List Chorus labs. You are the model. Chorus grades.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    inputSchema: { type: "object", properties: {} },
   },
   {
     name: "chorus_exam",
@@ -84,17 +84,17 @@ const TOOLS = [
   {
     name: "chorus_sitting",
     description: "Current sitting on this MCP session: scores, failures, pair count.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    inputSchema: { type: "object", properties: {} },
   },
   {
     name: "chorus_pairs",
     description: "Preference pairs from this sitting (JSONL). Empty unless a later score beat an earlier one.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    inputSchema: { type: "object", properties: {} },
   },
   {
     name: "chorus_ledger",
     description: "This sitting as a Chorus ledger run. Import it in the lab, or keep it with the pairs.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    inputSchema: { type: "object", properties: {} },
   },
 ];
 

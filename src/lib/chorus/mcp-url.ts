@@ -35,6 +35,6 @@ export function rotateMcpSit() {
 
 export function publicMcpUrl() {
   const sit = loadMcpSit();
-  if (typeof window === "undefined") return `/api/mcp?sit=${sit}`;
-  return `${window.location.origin}/api/mcp?sit=${sit}`;
+  if (typeof window === "undefined") return `/mcp/${sit}`;
+  return `${window.location.origin}/mcp/${sit}`;
 }

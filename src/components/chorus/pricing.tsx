@@ -11,7 +11,7 @@ const PLANS = [
     points: [
       "The model you already use writes the sitting",
       "Chorus grades the fixture and keeps the pairs",
-      "Copy /api/mcp from the lab",
+      "Copy /mcp from the lab",
       "No second key for the same model",
     ],
     cta: "Open the lab",

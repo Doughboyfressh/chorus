@@ -38,7 +38,7 @@ export function ModelSlotPanel() {
   const [note, setNote] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [sitRev, setSitRev] = useState(0);
-  const [mcpUrl, setMcpUrl] = useState("/api/mcp");
+  const [mcpUrl, setMcpUrl] = useState("/mcp");
   const [previewHost, setPreviewHost] = useState(false);
   useEffect(() => {
     setMcpUrl(publicMcpUrl());
@@ -116,7 +116,7 @@ export function ModelSlotPanel() {
           <ol className="mt-3 list-decimal space-y-1 pl-4 text-sm leading-relaxed text-muted">
             <li>Pick a lab. Paste the artifact you already use as gen 0.</li>
             <li>Score gen 0 here. A low number means the plants are still open. That is the start.</li>
-            <li>Copy this URL into Grok, Claude, or Cursor as an MCP server.</li>
+            <li>Copy this URL into Grok → Connectors → Custom. Transport: Streamable HTTP. Auth: none.</li>
             <li>Tell the host: run the Chorus sitting. Do not paste a key.</li>
             <li>Watch this tab. Same sitting. When the score rises, export the pairs.</li>
           </ol>
