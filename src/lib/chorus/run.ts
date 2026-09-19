@@ -1,3 +1,4 @@
+import { INTEGRITY_NOTE, quarantine } from "./integrity";
 import { toast } from "sonner";
 import { beginWork, cancelWork, isCancelled } from "./abort";
 import { chatFromSlot, chatJson } from "./chat";
@@ -13,7 +14,7 @@ import { MAX_GENERATIONS, MIN_GOAL } from "./labs";
 import { maxFixtureLevel } from "./fixtures";
 import { gradeArtifact } from "./grade";
 import { loadMcpSit, publicMcpUrl } from "./mcp-url";
-import { pairsJsonl, pairsJsonlClean, trainingJson } from "./pairs";
+import { pairsJsonl } from "./pairs";
 import { recurseTarget, unique, formatArtifact, sittingArtifact, judgeFromFixture } from "./ledger";
 import { resolveExecutor } from "./slot";
 import { useChorus } from "./store";
@@ -44,7 +45,8 @@ async function evalChat(args: Parameters<typeof chatFromSlot>[1]) {
 function stampEval<T extends { score: number; failed: string[] }>(result: T): T & { contaminated: boolean; executor: string } {
   const state = useChorus.getState();
   const resolved = resolveExecutor(state.slot, state.executor, state.hostedAvailable);
-  return { ...result, contaminated: resolved.contaminated, executor: resolved.label };
+  return quarantine({ ...result, executor: resolved.label,
+    executionContext: JSON.stringify(["unverified-client", resolved.slot.kind, resolved.slot.baseUrl, resolved.slot.model, 0.1, 700]) });
 }
 
 async function runFanoutAndMerge(
@@ -150,7 +152,7 @@ async function runEval() {
     const nextLevel = (current?.fixtureLevel ?? scored.level) + 1;
     if (nextLevel > maxFixtureLevel(run.labId)) {
       useChorus.getState().applyEval({ ...scored, exhausted: true });
-      toast.success("Fixture ladder exhausted. The artifact survived.");
+      toast.success("Public practice ladder completed. Independent validation is still required.");
       return;
     }
     toast.message("Fixture cleared. Mutating the test.");
@@ -161,7 +163,7 @@ async function runEval() {
   }
   if (scored.score >= 100 && scored.failed.length === 0 && scored.level >= maxFixtureLevel(run.labId)) {
     useChorus.getState().applyEval({ ...scored, exhausted: true });
-    toast.success("Fixture ladder exhausted. The artifact survived.");
+    toast.success("Public practice ladder completed. Independent validation is still required.");
     return;
   }
   toast.message(`Fixture v${scored.level + 1}: ${scored.score}/100.`);
@@ -213,10 +215,7 @@ async function runJudge() {
     useChorus.getState().skipJudge("No fixture score to judge.");
     return;
   }
-  const judged = judgeFromFixture(previous.evaluation ?? run.baseline, {
-    score: currEval.score,
-    failed: currEval.failed,
-  });
+  const judged = judgeFromFixture(previous.evaluation ?? run.baseline, currEval);
   useChorus.getState().applyJudge(judged);
   const closed = judged.holes.filter((h) => h.status === "closed").length;
   if (judged.verdict === "improved") {
@@ -251,7 +250,7 @@ export async function executeSwarm() {
     }
     try {
       const sit = loadMcpSit();
-      await fetch(`/api/sitting?sit=${encodeURIComponent(sit)}`, {
+      const response = await fetch(`/api/sitting?sit=${encodeURIComponent(sit)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -261,6 +260,7 @@ export async function executeSwarm() {
           pasted: state.pasted,
         }),
       });
+      if (!response.ok) throw new Error("Sitting update was rejected. Check the current lab and reset explicitly if changing labs.");
       useChorus.getState().bumpMcpSit();
       await navigator.clipboard.writeText(publicMcpUrl());
       toast.message("Chorus is conducting. MCP host: chorus_next, then chorus_fill, until done.");
@@ -365,7 +365,7 @@ export async function recurseSwarm() {
   const state = useChorus.getState();
   if (state.lane === "mcp") {
     try {
-      await fetch(`/api/sitting?sit=${encodeURIComponent(loadMcpSit())}`, {
+      const response = await fetch(`/api/sitting?sit=${encodeURIComponent(loadMcpSit())}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -375,11 +375,12 @@ export async function recurseSwarm() {
           pasted: state.pasted,
         }),
       });
+      if (!response.ok) throw new Error("Sitting update was rejected. Check the current lab and reset explicitly if changing labs.");
       useChorus.getState().bumpMcpSit();
       await navigator.clipboard.writeText(publicMcpUrl());
       toast.message("Recurse queued. Host: chorus_next until done.");
-    } catch {
-      toast.message("Recurse in the MCP host with chorus_next.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Sitting update failed; no successful update was confirmed.");
     }
     return;
   }
@@ -517,7 +518,7 @@ export function playbookMarkdown() {
     snap?.judge
       ? [
           "## Judge",
-          `Verdict: ${snap.judge.verdict}`,
+          `Unverified model opinion (not a validated verdict): ${snap.judge.verdict}`,
           snap.judge.score,
           ...snap.judge.holes.map((h) => `- [${h.status}] ${h.hole} — ${h.note}`),
         ].join("\n")
@@ -538,7 +539,7 @@ export function playbookMarkdown() {
       : "- No open holes",
     target.frozen.length ? target.frozen.map((h) => `- FROZEN: ${h}`).join("\n") : "",
     "",
-    "## Preference pairs",
+    "## Unverified diagnostic candidates — not training data",
     pairsJsonl(run) || "(none — the score never rose)",
   ];
   return lines.join("\n");
@@ -547,38 +548,18 @@ export function playbookMarkdown() {
 export function downloadPairs() {
   const run = useChorus.getState().run;
   if (!run) return;
-  const clean = pairsJsonlClean(run);
-  const all = pairsJsonl(run);
-  const body = clean || all;
-  if (!body) {
-    toast.message("No rising scores yet. No pairs to export.");
-    return;
-  }
-  if (clean) toast.message("Exported uncontaminated pairs. Contaminated rows stayed out.");
-  else toast.message("Every pair is contaminated (same model wrote and sat the exam).");
+  const body = pairsJsonl(run);
+  if (!body) { toast.message("No comparable diagnostic candidates to review."); return; }
   const blob = new Blob([body + "\n"], { type: "application/x-ndjson" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `chorus-pairs-${run.id.slice(0, 8)}.jsonl`;
+  a.download = `chorus-UNVERIFIED-review-${run.id.slice(0, 8)}.jsonl`;
   a.click();
   URL.revokeObjectURL(url);
+  toast.message("Downloaded unverified review candidates. Do not use them as clean training data.");
 }
 
 export function downloadTraining() {
-  const run = useChorus.getState().run;
-  if (!run) return;
-  const pack = trainingJson(run);
-  if (pack.includes('"dpo": []')) {
-    toast.message("No rising scores yet. Nothing to train on.");
-    return;
-  }
-  const blob = new Blob([pack], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `chorus-train-${run.id.slice(0, 8)}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-  toast.message("Training pack downloaded. Chorus did not move any weights.");
+  toast.error("Training export is locked. " + INTEGRITY_NOTE);
 }

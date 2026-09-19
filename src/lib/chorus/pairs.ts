@@ -1,4 +1,5 @@
-import type { SwarmRun } from "./types";
+import type { EvalResult, SwarmRun } from "./types.ts";
+import { artifactKey, cleanTrainingRows, comparableDiagnostics, INTEGRITY_NOTE } from "./integrity.ts";
 
 export type PreferencePair = {
   prompt: string;
@@ -11,103 +12,67 @@ export type PreferencePair = {
   labId: string;
   generation: number;
   contaminated?: boolean;
+  verified?: false;
+  integrityNote?: string;
 };
+
+/** Candidate for HUMAN REVIEW only; never a certified preference or training row. */
+export function diagnosticPair(args: {
+  prompt: string; rejected: string; chosen: string; previous?: EvalResult; current?: EvalResult;
+  model: string; generation: number;
+}): PreferencePair | null {
+  const { previous, current } = args;
+  if (!previous || !current || !comparableDiagnostics(previous, current)) return null;
+  if (current.score <= previous.score) return null;
+  const a = artifactKey(args.rejected), b = artifactKey(args.chosen);
+  if (!a || !b || a === b) return null;
+  if (current.failed.some((failure) => !previous.failed.includes(failure))) return null;
+  return {
+    prompt: args.prompt, chosen: args.chosen, rejected: args.rejected,
+    chosen_score: current.score, rejected_score: previous.score, fixture: current.fixture,
+    model: args.model, labId: current.labId, generation: args.generation,
+    // Both sides, public test exposure, and execution provenance remain unverified.
+    contaminated: true, verified: false, integrityNote: INTEGRITY_NOTE,
+  };
+}
 
 export function preferencePairs(run: SwarmRun): PreferencePair[] {
   const rows: PreferencePair[] = [];
-  const model = run.slotSnapshot?.model ?? "unknown";
-  const labId = run.labId ?? "generic";
+  const model = run.executorSnapshot?.model ?? run.slotSnapshot?.model ?? "unknown";
   const gens = [...run.generations].sort((a, b) => a.n - b.n);
-
-  if (run.baseline && run.pastedArtifact && gens[0]?.synthesis) {
-    const chosenScore = gens[0].evaluation?.score ?? 0;
-    if (chosenScore > run.baseline.score) {
-      rows.push({
-        prompt: run.goal,
-        rejected: run.pastedArtifact,
-        chosen: gens[0].synthesis.deliverable,
-        rejected_score: run.baseline.score,
-        chosen_score: chosenScore,
-        fixture: gens[0].evaluation?.fixture ?? run.baseline.fixture,
-        model,
-        labId,
-        generation: gens[0].n,
-        contaminated: Boolean(run.baseline?.contaminated || gens[0].evaluation?.contaminated),
-      });
-    }
-  }
-
-  for (let i = 1; i < gens.length; i++) {
-    const prev = gens[i - 1];
-    const cur = gens[i];
-    const prevScore = prev.evaluation?.score;
-    const curScore = cur.evaluation?.score;
-    if (typeof prevScore !== "number" || typeof curScore !== "number") continue;
-    if (curScore <= prevScore) continue;
-    const rejected = prev.synthesis?.deliverable;
-    const chosen = cur.synthesis?.deliverable;
-    if (!rejected || !chosen) continue;
-    rows.push({
-      prompt: run.goal,
-      rejected,
-      chosen,
-      rejected_score: prevScore,
-      chosen_score: curScore,
-      fixture: cur.evaluation?.fixture ?? prev.evaluation?.fixture ?? "",
-      model,
-      labId,
-      generation: cur.n,
-      contaminated: Boolean(cur.evaluation?.contaminated || prev.evaluation?.contaminated),
-    });
+  const candidates = [
+    ...(run.baseline && run.pastedArtifact && gens[0]?.synthesis ? [{
+      rejected: run.pastedArtifact, chosen: gens[0].synthesis.deliverable,
+      previous: run.baseline, current: gens[0].evaluation, generation: gens[0].n,
+    }] : []),
+    ...gens.slice(1).map((cur, i) => ({
+      rejected: gens[i].synthesis?.deliverable ?? "", chosen: cur.synthesis?.deliverable ?? "",
+      previous: gens[i].evaluation, current: cur.evaluation, generation: cur.n,
+    })),
+  ];
+  for (const candidate of candidates) {
+    const pair = diagnosticPair({ ...candidate, prompt: run.goal, model });
+    if (pair) rows.push(pair);
   }
   return rows;
 }
 
 export function pairsJsonl(run: SwarmRun) {
-  return preferencePairs(run)
-    .map((row) => JSON.stringify(row))
-    .join("\n");
+  return preferencePairs(run).map((row) => JSON.stringify(row)).join("\n");
 }
-
-export function cleanPairs(run: SwarmRun) {
-  return preferencePairs(run).filter((row) => !row.contaminated);
-}
-
-export function pairsJsonlClean(run: SwarmRun) {
-  return cleanPairs(run)
-    .map((row) => JSON.stringify(row))
-    .join("\n");
-}
+export function cleanPairs(run: SwarmRun) { return cleanTrainingRows(preferencePairs(run)); }
+export function pairsJsonlClean(run: SwarmRun) { return cleanPairs(run).map((row) => JSON.stringify(row)).join("\n"); }
 
 export type TrainingPack = {
-  v: 1;
-  model: string;
-  labId: string;
-  note: string;
-  dpo: PreferencePair[];
-  dpoClean: PreferencePair[];
+  v: 1; model: string; labId: string; note: string;
+  dpo: PreferencePair[]; dpoClean: PreferencePair[];
   sft: { messages: { role: "user" | "assistant"; content: string }[] }[];
 };
-
 export function trainingPack(run: SwarmRun): TrainingPack {
-  const dpo = preferencePairs(run);
-  const dpoClean = dpo.filter((row) => !row.contaminated);
   return {
-    v: 1,
-    model: run.slotSnapshot?.model ?? "unknown",
-    labId: run.labId ?? "generic",
-    note: "dpoClean is the train set. dpo includes contaminated rows (same model wrote and sat the exam).",
-    dpo,
-    dpoClean,
-    sft: dpoClean.map((row) => ({
-      messages: [
-        { role: "user" as const, content: row.prompt },
-        { role: "assistant" as const, content: row.chosen },
-      ],
-    })),
+    v: 1, model: run.slotSnapshot?.model ?? "unknown", labId: run.labId ?? "generic",
+    note: "dpo contains unverified diagnostic candidates for human review ONLY. dpoClean and sft are disabled until a trusted private-holdout A/B evaluator is implemented. " + INTEGRITY_NOTE,
+    dpo: preferencePairs(run), dpoClean: [], sft: [],
   };
 }
-
-export function trainingJson(run: SwarmRun) {
-  return JSON.stringify(trainingPack(run), null, 2);
-}
+export function trainingJson(run: SwarmRun) { return JSON.stringify(trainingPack(run), null, 2); }

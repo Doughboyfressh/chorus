@@ -15,17 +15,17 @@ const USES = [
     body: "When the artifact clears the fixture, the test mutates. The loop does not get to declare victory.",
   },
   {
-    title: "Pairs for your weights",
-    body: "Chosen only when the number rose. JSONL you can train on. The model in the slot is tagged.",
+    title: "Candidates for human review",
+    body: "Comparable practice improvements can be exported for review, not training. Verified training export is locked.",
   },
 ];
 
 const STEPS = [
-  { n: "01", title: "Paste", body: "The artifact you already use. Optional: your held-out test." },
+  { n: "01", title: "Paste", body: "The artifact you already use. Optional: your additional practice test." },
   { n: "02", title: "Score", body: "Gen 0 against a fixture the swarm does not write. A low number is the start." },
   { n: "03", title: "Connect", body: "MCP: copy the lab URL into Grok, Claude, or Cursor. Or paste a key. Or point at this machine." },
   { n: "04", title: "Recurse", body: "The host writes. Chorus grades. Open fixture failures become the next contract." },
-  { n: "05", title: "Export", body: "Pairs when the score rises. Playbook of the sitting. Stop when the ladder is exhausted." },
+  { n: "05", title: "Export", body: "Unverified review candidates and a playbook. Practice scores do not certify improvement." },
 ];
 
 export function Landing() {
@@ -40,8 +40,8 @@ export function Landing() {
           </h1>
           <p className="mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
             Chat with extra steps is not a product. A swarm that rewrites its own contract, scored
-            by a held-out fixture, is. Plug in Grok, Claude, GPT, Gemini, or a model on this
-            machine. The test does not care which.
+            by public practice fixtures, is a starting point—not proof of improvement. Plug in Grok, Claude, GPT, Gemini, or a model on this
+            machine. Independent validation is still required.
           </p>
           <p className="mt-4 max-w-xl text-sm leading-relaxed text-fg">{LOOP_LINE}</p>
           <div className="mt-8 flex flex-wrap gap-3">

@@ -1,3 +1,4 @@
+import { comparableDiagnostics, type DiagnosticIdentity } from "./integrity.ts";
 import type { JudgeVerdict, SwarmRun } from "./types";
 
 export function unique(items: string[]) {
@@ -91,8 +92,8 @@ export function recurseTarget(run: SwarmRun): RecurseTarget {
 }
 
 export function judgeFromFixture(
-  previous: { score?: number; failed?: string[] } | undefined,
-  current: { score: number; failed: string[] },
+  previous: (DiagnosticIdentity & { failed?: string[] }) | undefined,
+  current: DiagnosticIdentity & { score: number; failed: string[] },
 ): {
   verdict: "improved" | "stalled" | "worse";
   score: string;
@@ -104,8 +105,8 @@ export function judgeFromFixture(
   const holes = [
     ...prevFailed.map((hole) => ({
       hole,
-      status: (currSet.has(hole) ? "open" : "closed") as "open" | "closed",
-      note: currSet.has(hole) ? "Still fails the fixture." : "Cleared on the fixture.",
+      status: "open" as const,
+      note: currSet.has(hole) ? "Still fails this diagnostic." : "Not reproduced here; independent closure is unverified.",
     })),
     ...current.failed
       .filter((hole) => !prevSet.has(hole))
@@ -116,16 +117,12 @@ export function judgeFromFixture(
       })),
   ].slice(0, 8);
 
-  const prevScore = previous?.score;
-  let verdict: "improved" | "stalled" | "worse" = "stalled";
-  if (typeof prevScore === "number") {
-    if (current.score > prevScore) verdict = "improved";
-    else if (current.score < prevScore) verdict = "worse";
-  }
-
+  const comparable = comparableDiagnostics(previous, current);
   return {
-    verdict,
-    score: `Fixture ${typeof prevScore === "number" ? prevScore : "n/a"} → ${current.score}.`,
+    verdict: "stalled",
+    score: comparable
+      ? `Unverified practice scores ${previous!.score} → ${current.score}. No independently verified improvement.`
+      : "Tests, execution settings, or provenance are not comparable. No improvement verdict.",
     holes,
   };
 }

@@ -253,7 +253,7 @@ export function resolveExecutor(
   if (executor && slotReady(executor, hostedAvailable)) {
     return {
       slot: executor,
-      contaminated: sameWeights(writer, executor),
+      contaminated: true, // Caller-selected endpoints and names are not execution attestation.
       label: snapshotSlot(executor).model,
     };
   }

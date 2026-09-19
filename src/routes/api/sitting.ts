@@ -1,3 +1,4 @@
+import { readJsonLimited } from "@/lib/chorus/http-body";
 import { createFileRoute } from "@tanstack/react-router";
 import { applySittingUpdate, resetSitting, sittingFor, sittingPairs, sittingToRun, validSitId } from "@/lib/chorus/mcp-sitting";
 
@@ -55,9 +56,13 @@ export const Route = createFileRoute("/api/sitting")({
         }
         let body: { labId?: string; reset?: boolean; conduct?: boolean; goal?: string; pasted?: string } = {};
         try {
-          body = (await request.json()) as typeof body;
+          body = (await readJsonLimited(request)) as typeof body;
+          if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Invalid JSON object");
         } catch {
-          /* empty body is a reset */
+          return new Response(JSON.stringify({ error: "Invalid JSON body; no state changed" }), { status: 400, headers: { "content-type": "application/json" } });
+        }
+        if (!body.conduct && body.reset !== true) {
+          return new Response(JSON.stringify({ error: "Explicit reset:true is required" }), { status: 400, headers: { "content-type": "application/json" } });
         }
         if (body.conduct) {
           const sitting = await applySittingUpdate(sit, {

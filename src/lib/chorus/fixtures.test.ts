@@ -135,10 +135,11 @@ describe("plantHit", () => {
 });
 
 describe("parseFindings", () => {
-  it("reads string or object findings", () => {
-    const rows = parseFindings('{"findings":["a", {"issue":"b","quote":"c"}]}');
-    assert.equal(rows.length, 2);
-    assert.equal(rows[1]?.quote, "c");
+  it("requires structured issue/quote objects", () => {
+    assert.equal(parseFindings('{"findings":["a", {"issue":"b","quote":"c"}]}').length, 0);
+    const rows = parseFindings('{"findings":[{"issue":"b","quote":"c"}]}');
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.quote, "c");
   });
 });
 

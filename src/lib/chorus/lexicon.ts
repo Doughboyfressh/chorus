@@ -23,7 +23,7 @@ export const LEXICON = [
   {
     id: "prompt",
     term: "Prompt",
-    body: "The instructions you give a model. “Review this PR” is a prompt. Recurse a prompt means: make that text stricter, testable, harder to game, then prove it on held-out code.",
+    body: "The instructions you give a model. “Review this PR” is a prompt. Recurse a prompt means: make that text stricter, testable, harder to game, then try it on public practice code. Independent improvement requires separate private validation.",
   },
   {
     id: "eval",

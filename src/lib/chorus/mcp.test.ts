@@ -1,8 +1,23 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { handleMcp, negotiateProtocol } from "./mcp.ts";
+import { handleMcp as rawHandleMcp, negotiateProtocol } from "./mcp.ts";
 import { gradeArtifact } from "./grade.ts";
 import { dropSession } from "./mcp-sitting.ts";
+
+// Legacy happy-path cases use a valid client handshake. Security cases below
+// and integrity.test.ts invoke rawHandleMcp directly and never auto-create an exam.
+async function handleMcp(body: Parameters<typeof rawHandleMcp>[0], ctx: Parameters<typeof rawHandleMcp>[1]) {
+  const msg = body as { id?: number; method?: string; params?: { name?: string; arguments?: Record<string, unknown> } };
+  if (msg.method === "tools/call" && msg.params?.name === "chorus_score" && msg.params.arguments) {
+    const args = msg.params.arguments;
+    const res = await rawHandleMcp({ id: 999, method: "tools/call", params: { name: "chorus_exam", arguments: {
+      artifact: args.artifact, labId: args.labId, level: args.level, userTest: args.userTest,
+    } } }, ctx) as { result: { content: { text: string }[] } };
+    const exam = JSON.parse(res.result.content[0].text);
+    return rawHandleMcp({ ...msg, params: { ...msg.params, arguments: { ...args, attemptId: exam.attemptId } } }, ctx);
+  }
+  return rawHandleMcp(body, ctx);
+}
 
 const ctx = { sessionId: "test-session", protocol: "2025-03-26" };
 
@@ -122,11 +137,11 @@ describe("handleMcp", () => {
     assert.equal(payload.pairCount, 0);
   });
 
-  it("marks a pair clean when executor is another model", async () => {
+  it("keeps a claimed independent executor unverified", async () => {
     await dropSession("exec-session");
     const sid = { sessionId: "exec-session", protocol: "2025-03-26" };
     await tool(sid, 11, "chorus_exam", { labId: "prompt", level: 0 });
-    await tool(sid, 12, "chorus_score", { labId: "prompt", artifact: "review this please" });
+    await tool(sid, 12, "chorus_score", { labId: "prompt", artifact: "review this please", executor: "local-llama" });
     const second = (await handleMcp(
       {
         jsonrpc: "2.0",
@@ -151,14 +166,14 @@ describe("handleMcp", () => {
       sid,
     )) as { result: { content: { text: string }[] } };
     const payload = JSON.parse(second.result.content[0]!.text) as { pair: { contaminated: boolean } | null };
-    assert.equal(payload.pair?.contaminated, false);
+    assert.equal(payload.pair?.contaminated, true);
   });
 
   it("keeps grok-named executor contaminated", async () => {
     await dropSession("grok-exec");
     const sid = { sessionId: "grok-exec", protocol: "2025-03-26" };
     await tool(sid, 13, "chorus_exam", { labId: "prompt", level: 0 });
-    await tool(sid, 14, "chorus_score", { labId: "prompt", artifact: "review this please" });
+    await tool(sid, 14, "chorus_score", { labId: "prompt", artifact: "review this please", executor: "grok" });
     const second = (await handleMcp(
       {
         jsonrpc: "2.0",
@@ -310,7 +325,7 @@ describe("handleMcp", () => {
   it("rejects score before exam on execute labs", async () => {
     await dropSession("need-exam");
     const sid = { sessionId: "need-exam", protocol: "2025-03-26" };
-    const res = (await tool(sid, 50, "chorus_score", { labId: "prompt", artifact: "review this please" })) as {
+    const res = (await rawHandleMcp({ id: 50, method: "tools/call", params: { name: "chorus_score", arguments: { labId: "prompt", artifact: "review this please" } } }, sid)) as {
       result: { content: { text: string }[]; isError?: boolean };
     };
     const payload = JSON.parse(res.result.content[0]!.text) as { error?: string };

@@ -181,10 +181,12 @@ export function ModelSlotPanel() {
                 headers: { "content-type": "application/json" },
                 body: JSON.stringify({ reset: true }),
               })
-                .then(() => {
+                .then((response) => {
+                  if (!response.ok) throw new Error("Sitting reset was rejected; history was not confirmed cleared.");
                   bumpMcpSit();
                   setSitRev((n) => n + 1);
                 })
+                .catch((err) => window.alert(err instanceof Error ? err.message : "Sitting reset failed."))
                 .finally(() => setWiping(false));
             }}
           >
@@ -301,7 +303,7 @@ function ExecutorPicker({
 
   return (
     <div className="mt-6">
-      <p className="font-mono text-xs uppercase tracking-widest text-subtle">Held-out executor</p>
+      <p className="font-mono text-xs uppercase tracking-widest text-subtle">Practice executor</p>
       <label className="mt-3 block">
         <span className="sr-only">Executor</span>
         <Select
@@ -330,9 +332,7 @@ function ExecutorPicker({
         </Select>
       </label>
       <p className="mt-2 text-sm leading-relaxed text-muted">
-        {resolved.contaminated
-          ? `The fixture will run on ${resolved.label} — the same weights that write.`
-          : `The fixture runs on ${resolved.label}, not the writer.`}
+        {`Practice runs on ${resolved.label}. Selecting a different model does not establish independence or unlock training export.`}
       </p>
     </div>
   );

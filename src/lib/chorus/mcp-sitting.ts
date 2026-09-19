@@ -1,6 +1,11 @@
+import { requireDurableDatabase } from "./durable-storage.ts";
+import { writeSnapshot } from "./snapshot-store.ts";
 import { validSitId } from "./mcp-url.ts";
 import { gradeArtifact } from "./grade.ts";
-import type { PreferencePair } from "./pairs.ts";
+import { diagnosticPair, type PreferencePair } from "./pairs.ts";
+import { boundedText, INTEGRITY_NOTE, MAX_ARTIFACT, quarantine } from "./integrity.ts";
+import { issueAttempt, consumeAttempt, invalidateAttempts, type ExamBinding } from "./attempts.ts";
+import { examFor } from "./grade.ts";
 import type { Agent, EvalResult, Generation, SwarmRun } from "./types.ts";
 import {
   applyFill,
@@ -15,6 +20,7 @@ import {
 
 export type McpSitting = {
   id: string;
+  revision?: number;
   labId: string;
   lock?: string;
   level: number;
@@ -26,9 +32,10 @@ export type McpSitting = {
   patches?: { specialist: string; patch: string }[];
   merge?: string;
   orchestra?: Orchestra;
-  exam?: { labId: string; level: number };
+  exam?: ExamBinding & { attemptId: string; expiresAt: number };
   scores: {
     artifact: string;
+    evaluation?: EvalResult;
     score: number;
     failed: string[];
     passed: string[];
@@ -41,7 +48,6 @@ export type McpSitting = {
 
 const MAX = 80;
 const MAX_PAYLOAD = 400_000;
-const MAX_ARTIFACT = 24_000;
 const bySession = new Map<string, McpSitting>();
 
 export { validSitId };
@@ -49,10 +55,11 @@ export { validSitId };
 async function sqlClient() {
   if (typeof process !== "undefined" && process.env.NODE_TEST_CONTEXT) return null;
   try {
+    requireDurableDatabase(process.env);
     const { getSql } = await import("../db.ts");
     return await getSql();
   } catch {
-    return null;
+    throw new Error("Sitting storage is unavailable; no unverified fallback is permitted.");
   }
 }
 
@@ -60,33 +67,30 @@ async function loadFromDb(id: string): Promise<McpSitting | null> {
   const sql = await sqlClient();
   if (!sql) return null;
   try {
-    const rows = await sql<{ payload: string }>`
-      select payload from chorus_mcp_sittings
+    const rows = await sql<{ payload: string; revision: number }>`
+      select payload, revision from chorus_mcp_sittings
       where id = ${id} and updated_at > now() - interval '14 days'
       limit 1
     `;
     const raw = rows[0]?.payload;
     if (!raw) return null;
     const parsed = JSON.parse(raw) as McpSitting;
-    if (!parsed?.id) return null;
+    if (parsed?.id !== id || !Array.isArray(parsed.scores) || !Array.isArray(parsed.pairs)) throw new Error("Invalid stored sitting");
+    parsed.revision = Number(rows[0].revision);
     bySession.set(id, parsed);
     return parsed;
   } catch {
-    return null;
+    throw new Error("Stored sitting could not be read safely.");
   }
 }
 
 async function saveToDb(sitting: McpSitting) {
   const payload = JSON.stringify(sitting);
-  if (payload.length > MAX_PAYLOAD) return;
+  if (payload.length > MAX_PAYLOAD) throw new Error("Sitting is too large to record safely.");
   const sql = await sqlClient();
   if (!sql) return;
   try {
-    await sql`
-      insert into chorus_mcp_sittings (id, payload, updated_at)
-      values (${sitting.id}, ${payload}, now())
-      on conflict (id) do update set payload = excluded.payload, updated_at = now()
-    `;
+    sitting.revision = await writeSnapshot(sql, sitting.id, payload, sitting.revision ?? 0);
     await sql`delete from chorus_mcp_sittings where updated_at < now() - interval '14 days'`;
     await sql`
       delete from chorus_mcp_sittings
@@ -96,8 +100,9 @@ async function saveToDb(sitting: McpSitting) {
         offset 500
       )
     `;
-  } catch {
-    /* table missing in a fresh test process */
+  } catch (err) {
+    bySession.delete(sitting.id);
+    throw err;
   }
 }
 
@@ -138,15 +143,37 @@ export async function assertWriter(sessionId: string, writeKey?: string) {
   };
 }
 
-export async function markExam(sessionId: string, labId: string, level: number) {
+export async function markExam(sessionId: string, labId: string, level: number, artifact: string, userTest?: string) {
   const sitting = await sittingFor(sessionId, labId);
-  sitting.exam = { labId, level };
+  examFor(labId, level, userTest); // Reject unknown labs and invalid levels before changing state.
+  boundedText(artifact, "artifact", MAX_ARTIFACT, 8);
+  if (sitting.scores.length && (sitting.labId !== labId || sitting.level !== level)) {
+    throw new Error("Lab and level are pinned. Reset explicitly to start a different test.");
+  }
+  const binding = { labId, level, artifact, userTest };
+  const attempt = await issueAttempt(sessionId, binding);
+  sitting.labId = labId;
+  sitting.level = level;
+  sitting.exam = { ...binding, ...attempt };
   await saveToDb(sitting);
-  return sitting;
+  return attempt;
 }
 
-export function examReady(sitting: { exam?: { labId: string; level: number } }, labId: string, level: number) {
-  return sitting.exam?.labId === labId && sitting.exam.level === level;
+export function examReady(sitting: Pick<McpSitting, "exam">, labId: string, level: number,
+  artifact: string, attemptId: string, userTest?: string) {
+  const exam = sitting.exam;
+  return Boolean(exam && exam.attemptId === attemptId && exam.expiresAt > Date.now() &&
+    exam.labId === labId && exam.level === level && exam.artifact === artifact &&
+    (exam.userTest ?? "") === (userTest ?? ""));
+}
+
+export async function consumeExam(sessionId: string, binding: ExamBinding, attemptId: string) {
+  const current = await sittingFor(sessionId);
+  if (!examReady(current, binding.labId, binding.level, binding.artifact, attemptId, binding.userTest)) return false;
+  if (!await consumeAttempt(sessionId, attemptId, binding)) return false;
+  delete current.exam;
+  await saveToDb(current);
+  return true;
 }
 
 export async function sittingFor(sessionId: string, labId = "prompt"): Promise<McpSitting> {
@@ -159,82 +186,44 @@ export async function sittingFor(sessionId: string, labId = "prompt"): Promise<M
   return sitting;
 }
 
-export function writerRanExam(executor?: string) {
-  const e = (executor ?? "").trim().toLowerCase();
-  if (!e || e.length < 6) return true;
-  if (
-    /^(self|host|same|this|writer|chorus|mcp[- ]?host|grok|claude|sonnet|opus|gemini|chatgpt|openai|anthropic|xai)([-_.].*)?$/.test(
-      e,
-    )
-  ) {
-    return true;
-  }
-  if (/\b(grok|claude|chatgpt|gpt-?[45]|gemini|sonnet|opus)\b/.test(e)) return true;
-  return false;
+export function writerRanExam(_executor?: string) {
+  // A user-supplied name cannot establish that a different model ran anything.
+  return true;
 }
 
 export async function recordScore(sessionId: string, artifact: string, graded: EvalResult, goal = "", executor?: string) {
-  const clipped = artifact.slice(0, MAX_ARTIFACT);
+  boundedText(artifact, "artifact", MAX_ARTIFACT, 8);
   const sitting = await sittingFor(sessionId, graded.labId);
+  if (sitting.scores.length >= 8) return { sitting, pair: null, graded, capped: true as const };
+  if (sitting.scores.length && (sitting.labId !== graded.labId || sitting.level !== graded.level)) {
+    throw new Error("Lab and level are pinned. Reset explicitly to start a different test.");
+  }
   if (executor?.trim()) sitting.executor = executor.trim().slice(0, 80);
-  const contaminated = writerRanExam(sitting.executor);
-  sitting.labId = graded.labId;
-  sitting.level =
-    graded.score >= 100 && graded.failed.length === 0 && !graded.exhausted
-      ? graded.level + 1
-      : graded.level;
-  sitting.current = clipped;
-  if (!sitting.artifact0) sitting.artifact0 = clipped;
+  const evaluation = quarantine({ ...graded, executionContext: JSON.stringify(["mcp-host:unverified", sitting.executor || "mcp-host"]) });
   const prev = sitting.scores.at(-1);
-  if (sitting.scores.length >= 8) {
-    await saveToDb(sitting);
-    return { sitting, pair: null, graded, capped: true as const };
-  }
-  sitting.scores.push({
-    artifact: clipped,
-    score: graded.score,
-    failed: graded.failed,
-    passed: graded.passed,
-    fixture: graded.fixture,
-    executor: sitting.executor,
-    contaminated,
-  });
-  const sameArtifact =
-    Boolean(prev) && prev!.artifact.replace(/\s+/g, " ").trim() === clipped.replace(/\s+/g, " ").trim();
-  let pair: PreferencePair | null = null;
-  if (prev && graded.score > prev.score && !sameArtifact) {
-    pair = {
-      prompt: (goal || sitting.labId).slice(0, 800),
-      rejected: prev.artifact,
-      chosen: clipped,
-      rejected_score: prev.score,
-      chosen_score: graded.score,
-      fixture: graded.fixture,
-      model: sitting.executor || "mcp-host",
-      labId: sitting.labId,
-      generation: sitting.scores.length,
-      contaminated,
-    };
-    sitting.pairs.push(pair);
-  }
+  const pair = prev ? diagnosticPair({
+    prompt: (goal || sitting.labId).slice(0, 800), rejected: prev.artifact, chosen: artifact,
+    previous: prev.evaluation, current: evaluation, model: sitting.executor || "mcp-host",
+    generation: sitting.scores.length + 1,
+  }) : null;
+  sitting.labId = graded.labId;
+  sitting.level = graded.score >= 100 && graded.failed.length === 0 && !graded.exhausted ? graded.level + 1 : graded.level;
+  sitting.current = artifact;
+  if (!sitting.artifact0) sitting.artifact0 = artifact;
+  sitting.scores.push({ artifact, evaluation, score: graded.score, failed: graded.failed,
+    passed: graded.passed, fixture: graded.fixture, executor: sitting.executor, contaminated: true });
+  if (pair) sitting.pairs.push(pair);
   evict();
   await saveToDb(sitting);
-  return { sitting, pair, graded, capped: false as const };
+  return { sitting, pair, graded: evaluation, capped: false as const };
 }
 
 function asEval(row: McpSitting["scores"][number], labId: string, level: number): EvalResult {
   const executor = row.executor || "MCP host";
-  return {
-    labId,
-    fixture: row.fixture,
-    score: row.score,
-    passed: row.passed,
-    failed: row.failed,
-    evidence: executor,
-    level,
-    executor,
-    contaminated: row.contaminated ?? writerRanExam(row.executor),
-  };
+  return quarantine(row.evaluation ?? {
+    labId, fixture: row.fixture, score: row.score, passed: row.passed, failed: row.failed,
+    evidence: "Legacy result; original test identity and execution were not verified.", level, executor,
+  });
 }
 
 function agentsFromSitting(sitting: McpSitting): Agent[] {
@@ -342,6 +331,9 @@ export async function sittingSnapshot(sessionId: string) {
     level: sitting.level,
     generations: sitting.scores.length,
     currentScore: sitting.scores.at(-1)?.score ?? null,
+    verified: false,
+    integrityNote: INTEGRITY_NOTE,
+    cleanPairCount: 0,
     failed: sitting.scores.at(-1)?.failed ?? [],
     pairCount: sitting.pairs.length,
     executor: sitting.executor ?? null,
@@ -370,11 +362,12 @@ export async function applySittingUpdate(
     pasted?: string;
   },
 ) {
+  if (args.labId !== undefined) examFor(args.labId, 0);
   const existing = bySession.get(sessionId) ?? (await loadFromDb(sessionId));
   if (args.reset) {
     await resetSitting(sessionId, args.labId || existing?.labId);
   } else if (args.labId && existing && existing.labId !== args.labId && existing.scores.length > 0) {
-    await resetSitting(sessionId, args.labId);
+    throw new Error("Lab is pinned. Use an explicit reset to change labs; existing history was not erased.");
   }
   const sitting = await sittingFor(sessionId, args.labId || existing?.labId || "prompt");
   if (args.labId) sitting.labId = args.labId;
@@ -424,10 +417,20 @@ export async function nextOrchestraSeat(sessionId: string) {
   if (!seat) {
     return { done: true, pairCount: sitting.pairs.length, generations: sitting.scores.length };
   }
+  if (seat === "exam") {
+    const artifact = mergeDeliverable(sitting.orchestra) || sitting.current || "";
+    let attempt = sitting.exam;
+    if (!attempt || !examReady(sitting, sitting.labId, sitting.level, artifact, attempt.attemptId)) {
+      await markExam(sessionId, sitting.labId, sitting.level, artifact);
+      attempt = sitting.exam;
+    }
+    return { done: false, ...seatPrompt(sitting.orchestra, seat), attemptId: attempt?.attemptId,
+      note: "Return this attemptId with chorus_fill. This is unverified practice, not an independent exam." };
+  }
   return { done: false, ...seatPrompt(sitting.orchestra, seat) };
 }
 
-export async function fillOrchestraSeat(sessionId: string, seat: string, text: string) {
+export async function fillOrchestraSeat(sessionId: string, seat: string, text: string, attemptId?: string) {
   const sitting = await sittingFor(sessionId);
   if (!sitting.orchestra) {
     return { error: "No conducted sitting." };
@@ -436,6 +439,12 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
   if (!pending) return { error: "Every seat is filled.", done: true };
   if (seat && seat !== pending) {
     return { error: `Fill ${pending} next.`, pending };
+  }
+  if (pending === "exam") {
+    const artifact = mergeDeliverable(sitting.orchestra) || sitting.current || "";
+    if (!attemptId || !await consumeExam(sessionId, { labId: sitting.labId, level: sitting.level, artifact }, attemptId)) {
+      return { error: "Request chorus_next and submit its unused attemptId for this exact artifact." };
+    }
   }
   sitting.orchestra = applyFill(sitting.orchestra, pending, text);
   const staff = orchestraStaff(sitting.orchestra);
@@ -452,7 +461,6 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
   }
   if (pending === "exam") {
     const deliverable = mergeDeliverable(sitting.orchestra) || sitting.current || "";
-    sitting.exam = { labId: sitting.labId, level: sitting.level };
     const graded = gradeArtifact({
       labId: sitting.labId,
       deliverable,
@@ -467,7 +475,6 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
       sitting.executor,
     );
     recorded.sitting.orchestra = sitting.orchestra;
-    recorded.sitting.exam = sitting.exam;
     await saveToDb(recorded.sitting);
     const next = pendingSeat(recorded.sitting.orchestra!);
     return {
@@ -486,10 +493,12 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
 
 export async function sittingPairs(sessionId: string) {
   const sitting = bySession.get(sessionId) ?? (await loadFromDb(sessionId));
-  return sitting?.pairs ?? [];
+  return (sitting?.pairs ?? []).map((row) => ({ ...row, contaminated: true, verified: false as const, integrityNote: INTEGRITY_NOTE }));
 }
 
 export async function resetSitting(sessionId: string, labId?: string) {
+  if (labId !== undefined) examFor(labId, 0);
+  await invalidateAttempts(sessionId);
   const existing = bySession.get(sessionId) ?? (await loadFromDb(sessionId));
   const sitting: McpSitting = {
     id: sessionId,
@@ -498,6 +507,7 @@ export async function resetSitting(sessionId: string, labId?: string) {
     scores: [],
     pairs: [],
     lock: existing?.lock,
+    revision: existing?.revision,
   };
   bySession.set(sessionId, sitting);
   await saveToDb(sitting);
@@ -505,6 +515,7 @@ export async function resetSitting(sessionId: string, labId?: string) {
 }
 
 export async function dropSession(sessionId: string) {
+  await invalidateAttempts(sessionId);
   bySession.delete(sessionId);
   const sql = await sqlClient();
   if (!sql) return;

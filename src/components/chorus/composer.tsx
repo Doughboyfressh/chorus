@@ -121,12 +121,12 @@ export function Composer() {
             className="min-h-20"
             value={userTest}
             disabled={busy}
-            placeholder="Optional: your held-out test. Stacks on the lab fixture."
+            placeholder="Optional: an additional ungraded test. Stacks on the lab fixture."
             onChange={(event) => setUserTest(event.target.value)}
           />
           {baseline ? (
             <p className="text-sm text-muted">
-              Gen 0 scored {baseline.score}/100
+              Gen 0 practice {baseline.score}/100 · unverified
               {baseline.failed.length ? ` · failing ${baseline.failed.join(" · ")}` : ""}.
             </p>
           ) : null}

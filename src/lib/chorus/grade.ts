@@ -1,3 +1,4 @@
+import { boundedText, INTEGRITY_VERSION, MAX_ARTIFACT, MAX_FINDINGS, MAX_USER_TEST, quarantine } from "./integrity.ts";
 import {
   applyUserTest,
   combineFixtureScore,
@@ -9,11 +10,13 @@ import {
 import type { EvalResult } from "./types.ts";
 
 export function examFor(labId?: string, level = 0, userTest?: string) {
+  if (userTest !== undefined) boundedText(userTest, "userTest", MAX_USER_TEST);
   const fixture = applyUserTest(resolveFixture(labId, level), userTest);
   return {
     labId: fixture.labId,
     title: fixture.title,
-    blurb: fixture.blurb,
+    blurb: "Public practice exercise, not a private holdout.",
+    verification: "unverified",
     task: fixture.task,
     input: fixture.input,
     execute: fixture.execute,
@@ -21,7 +24,7 @@ export function examFor(labId?: string, level = 0, userTest?: string) {
     findingsSchema: '{ "findings": [{ "issue": "one line", "quote": "exact line copied from input" }] }',
     note: fixture.execute
       ? "Run exam.input under the artifact. Score with findings JSON. quote must be a verbatim line from input, not from your spec."
-      : "Checklist only. Send the artifact to score.",
+      : "Diagnostic checklist only. This is not an execution score.",
   };
 }
 
@@ -33,15 +36,18 @@ export function gradeArtifact(args: {
   userTest?: string;
   level?: number;
 }): EvalResult {
-  const requested = Math.max(0, Number(args.level) || 0);
+  boundedText(args.deliverable, "artifact", MAX_ARTIFACT, 1);
+  if (args.title !== undefined) boundedText(args.title, "title", 2000);
+  if (args.findings !== undefined) boundedText(args.findings, "findings", MAX_FINDINGS);
+  if (args.userTest !== undefined) boundedText(args.userTest, "userTest", MAX_USER_TEST);
   const max = maxFixtureLevel(args.labId);
-  const level = Math.min(requested, Math.max(max, 0));
+  const level = args.level ?? 0;
   const fixture = applyUserTest(resolveFixture(args.labId, level), args.userTest);
   const artifact = `${args.title ?? ""}\n${args.deliverable}`;
   const structural = scoreChecks(artifact, fixture.checks);
   let plantedPassed: string[] = [];
   let plantedFailed: string[] = [];
-  let evidence = "Scored against the held-out checklist only.";
+  let evidence = "Diagnostic checklist only; no execution was verified.";
   const shouldRun = fixture.execute && (fixture.planted.length > 0 || fixture.input.trim().length > 0);
   const findings = args.findings?.trim() ?? "";
 
@@ -52,10 +58,8 @@ export function gradeArtifact(args: {
         if (plantHit(plant, findings, fixture.input)) plantedPassed.push(plant.label);
         else plantedFailed.push(plant.label);
       }
-    } else if (findings.length < 8) {
-      plantedFailed = ["Produced output on the brought test"];
     } else {
-      plantedPassed = ["Produced output on the brought test"];
+      plantedFailed = ["No evaluator is configured for this brought test"];
     }
   } else if (shouldRun) {
     plantedFailed =
@@ -65,13 +69,19 @@ export function gradeArtifact(args: {
     evidence = "No findings yet. Use exam.task + exam.input with your model, then score again.";
   }
 
-  const score = combineFixtureScore({
+  let score = combineFixtureScore({
     checkPassed: structural.passed.length,
     checkTotal: fixture.checks.length || 1,
     plantPassed: plantedPassed.length,
     plantTotal: plantedPassed.length + plantedFailed.length,
     execute: shouldRun,
   });
+
+  // Appending arbitrary text never proves the additional test passed.
+  if (args.userTest?.trim()) {
+    plantedFailed.push("Brought test is ungraded; an independent evaluator is required");
+    score = fixture.planted.length ? Math.min(score, 79) : 0;
+  }
 
   const platePassed = shouldRun && (plantedPassed.length + plantedFailed.length) > 0 ? plantedPassed : structural.passed;
   const plateFailed = shouldRun && (plantedPassed.length + plantedFailed.length) > 0 ? plantedFailed : structural.failed;
@@ -82,7 +92,11 @@ export function gradeArtifact(args: {
       ? "Host must run the exam, then chorus_score with findings that quote exam.input."
       : undefined;
 
-  return {
+  return quarantine({
+    integrityVersion: INTEGRITY_VERSION,
+    // Exact, public test identity for diagnostic comparisons; this is NOT a signature.
+    testKey: JSON.stringify([INTEGRITY_VERSION, fixture.labId, level, fixture.task, fixture.input]),
+    executionContext: "unverified-submission",
     labId: fixture.labId,
     fixture: fixture.title,
     score,
@@ -92,5 +106,5 @@ export function gradeArtifact(args: {
     level,
     exhausted: level >= max && score >= 100 && plateFailed.length === 0,
     quoteHint,
-  };
+  });
 }

@@ -1,3 +1,5 @@
+import { comparableDiagnostics } from "@/lib/chorus/integrity";
+import { judgeFromFixture } from "@/lib/chorus/ledger";
 import { baselineAsGeneration, viewedGeneration, useChorus } from "@/lib/chorus/store";
 import type { Generation, HoleStatus, JudgeResult } from "@/lib/chorus/types";
 import { cn } from "@/lib/utils";
@@ -29,7 +31,7 @@ function GenColumn({ gen }: { gen: Generation }) {
       </h3>
       {typeof gen.evaluation?.score === "number" ? (
         <p className="mt-2 font-mono text-xs tabular-nums tracking-widest text-subtle">
-          Fixture {gen.evaluation.score}/100
+          Practice {gen.evaluation.score}/100 · unverified
         </p>
       ) : null}
       <p className="mt-3 text-sm leading-relaxed text-muted">{excerpt(gen.contract || "No contract.")}</p>
@@ -62,17 +64,17 @@ export function ComparePlate() {
   const left =
     viewingN === 1 ? baselineAsGeneration(run) : viewedGeneration(run, viewingN - 1);
   if (!right || !left || left.n === right.n) return null;
-  const judge = right.judge ?? run.judge;
+  const judge = right.evaluation ? judgeFromFixture(left.evaluation, right.evaluation) : undefined;
   const leftScore = left.evaluation?.score;
   const rightScore = right.evaluation?.score;
   const delta =
-    typeof leftScore === "number" && typeof rightScore === "number" ? rightScore - leftScore : null;
+    comparableDiagnostics(left.evaluation, right.evaluation) && typeof leftScore === "number" && typeof rightScore === "number" ? rightScore - leftScore : null;
 
   return (
     <div className="mb-8">
       {typeof rightScore === "number" ? (
         <div className="mb-4 rounded-xl bg-surface-2 p-4">
-          <p className="font-mono text-xs uppercase tracking-widest text-subtle">Fixture delta</p>
+          <p className="font-mono text-xs uppercase tracking-widest text-subtle">Practice comparison · unverified</p>
           <p className="mt-2 font-display text-2xl leading-tight text-fg">
             {leftScore ?? "—"} → {rightScore}
             {delta !== null ? (
@@ -82,7 +84,7 @@ export function ComparePlate() {
             ) : null}
           </p>
           <p className="mt-2 text-sm leading-relaxed text-muted">
-            {right.evaluation?.fixture ?? "Held-out test"}
+            {right.evaluation?.fixture ?? "Public practice test"}
             {right.evaluation?.failed?.length
               ? ` · still failing: ${right.evaluation.failed.join(" · ")}`
               : ""}
@@ -93,7 +95,7 @@ export function ComparePlate() {
         <div className="mb-4 rounded-xl bg-surface-2 p-4">
           <p className="font-mono text-xs uppercase tracking-widest text-subtle">Judge</p>
           <p className={cn("mt-2 font-display text-2xl leading-tight", verdictTone(judge.verdict))}>
-            {judge.verdict}
+            {"unverified"}
           </p>
           <p className="mt-2 text-sm leading-relaxed text-fg">{judge.score}</p>
           {judge.holes.length > 0 ? (

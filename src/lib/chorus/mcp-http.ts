@@ -1,9 +1,10 @@
-import { dropSession, validSitId } from "./mcp-sitting";
-import { handleMcp, negotiateProtocol, type McpCtx } from "./mcp";
-import { clientKey, rateLimit } from "./limit";
+import { browserOriginAllowed, readJsonLimited } from "./http-body.ts";
+import { dropSession, validSitId } from "./mcp-sitting.ts";
+import { handleMcp, negotiateProtocol, type McpCtx } from "./mcp.ts";
+import { clientKey, rateLimit } from "./limit.ts";
 
 const cors: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
+  "Vary": "Origin",
   "Access-Control-Allow-Headers":
     "content-type, mcp-session-id, mcp-protocol-version, accept, last-event-id",
   "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
@@ -111,11 +112,13 @@ export const mcpHandlers = {
     return sseStream(protocol, request, clientSession);
   },
   DELETE: async ({ request, params }: Ctx) => {
+    if (!browserOriginAllowed(request)) return new Response("Forbidden", { status: 403 });
     const { sessionId } = sittingFrom(request, params?.sit);
     await dropSession(sessionId);
     return new Response(null, { status: 204, headers: cors });
   },
   POST: async ({ request, params }: Ctx) => {
+    if (!browserOriginAllowed(request)) return new Response("Forbidden", { status: 403 });
     const { sessionId, clientSession } = sittingFrom(request, params?.sit);
     const protocolHint = protocolFrom(request);
     if (!rateLimit(`mcp:${clientKey(request)}`, 120, 60_000)) {
@@ -137,12 +140,12 @@ export const mcpHandlers = {
     }
     let body: unknown;
     try {
-      body = await request.json();
-    } catch {
+      body = await readJsonLimited(request);
+    } catch (err) {
       return json(
-        { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } },
+        { jsonrpc: "2.0", id: null, error: { code: -32700, message: err instanceof Error ? err.message : "Parse error" } },
         protocolHint,
-        400,
+        err instanceof Error && err.message === "Payload too large" ? 413 : 400,
         clientSession,
       );
     }
