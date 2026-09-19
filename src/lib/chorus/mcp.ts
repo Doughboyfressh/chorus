@@ -1,6 +1,6 @@
 import { LABS } from "./labs.ts";
 import { examFor, gradeArtifact } from "./grade.ts";
-import { applySittingUpdate, dropSession, recordScore, resetSitting, sittingFor, sittingPairs, sittingSnapshot, sittingToRun } from "./mcp-sitting.ts";
+import { applySittingUpdate, dropSession, fillOrchestraSeat, nextOrchestraSeat, recordScore, resetSitting, sittingFor, sittingPairs, sittingSnapshot, sittingToRun } from "./mcp-sitting.ts";
 
 export const MCP_PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"] as const;
 
@@ -33,17 +33,17 @@ function textResult(payload: unknown, isError = false) {
   };
 }
 
-const SITTING_PROMPT = `You are running a Chorus sitting. You (the host model) are the swarm. Chorus grades and keeps the pairs.
+const SITTING_PROMPT = `You are an MCP host for Chorus. Chorus conducts. You play the seats. Chorus grades.
 
+If chorus_next returns a seat: YOU are that role. Produce the JSON it asked for. chorus_fill with that text. Repeat until done is true.
+
+Otherwise a host sitting:
 1. chorus_labs — pick ONE lab. Stay on it.
-2. chorus_score the user's paste as gen 0. Weak is correct. If the lab executes, chorus_exam first, run that input under the artifact, then chorus_score with findings JSON {findings:[{issue, quote}]}. quote must be a verbatim line from exam.input, not from your spec.
-3. chorus_sitting with contract plus 3 non-overlapping specialists. Then chorus_sitting specialist+patch for each. chorus_sitting merge for the deliverable. Score the merge.
-4. Recurse only on failed plants. A later score beating an earlier one writes a pair.
-5. If a different model sat the exam, chorus_score executor with that model name — otherwise the pair is contaminated.
-6. Stop when exhausted is true, or at 8 generations. chorus_pairs.
-7. Generation 8 or a new lab: chorus_sitting with reset:true. Same MCP URL.
+2. chorus_score the user's paste as gen 0. Weak is correct. If the lab executes, chorus_exam first, then chorus_score with findings JSON {findings:[{issue, quote}]}. quote is a verbatim line from exam.input.
+3. Recurse only on failed plants. A later score beating an earlier one writes a pair.
+4. Generation 8: chorus_sitting with reset:true. Same MCP URL.
 
-Do not ask the user for an API key. You are the model.`;
+Do not ask for an API key. You are the model.`;
 
 const TOOLS = [
   {
@@ -86,7 +86,7 @@ const TOOLS = [
   {
     name: "chorus_sitting",
     description:
-      "Sitting status, or mutate it. reset:true wipes in place. contract + specialists staffs the swarm. specialist + patch records a seat. merge records the deliverable. executor names a second model.",
+      "Sitting status, or mutate it. conduct:true starts the eight-seat swarm (Chorus issues prompts, you fill). reset:true wipes in place.",
     inputSchema: {
       type: "object",
       properties: {
@@ -104,7 +104,28 @@ const TOOLS = [
         patch: { type: "string" },
         merge: { type: "string" },
         executor: { type: "string" },
+        conduct: { type: "boolean", description: "Start the eight-seat swarm. Chorus issues each seat via chorus_next." },
+        goal: { type: "string" },
+        pasted: { type: "string" },
       },
+    },
+  },
+  {
+    name: "chorus_next",
+    description:
+      "Next seat Chorus wants you to play (conductor, specialist, critic, synthesizer, improver, judge). Fill it with chorus_fill. Repeat until done.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "chorus_fill",
+    description: "Submit this host's completion for the current seat. Then call chorus_next.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        seat: { type: "string" },
+        text: { type: "string" },
+      },
+      required: ["text"],
     },
   },
   {
@@ -248,7 +269,8 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
       args.patch ||
       args.merge ||
       args.executor ||
-      args.labId;
+      args.labId ||
+      args.conduct;
     if (mutated) {
       await applySittingUpdate(sessionId, {
         reset: args.reset === true,
@@ -261,6 +283,9 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
         patch: args.patch ? String(args.patch) : undefined,
         merge: args.merge ? String(args.merge) : undefined,
         executor: args.executor ? String(args.executor) : undefined,
+        conduct: args.conduct === true,
+        goal: args.goal ? String(args.goal) : undefined,
+        pasted: args.pasted ? String(args.pasted) : undefined,
       });
     }
     const snap = await sittingSnapshot(sessionId);
@@ -281,6 +306,14 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
   if (name === "chorus_ledger") {
     const run = await sittingToRun(sessionId);
     return textResult(run ?? { error: "No sitting yet. Call chorus_score." }, !run);
+  }
+  if (name === "chorus_next") {
+    return textResult(await nextOrchestraSeat(sessionId));
+  }
+  if (name === "chorus_fill") {
+    const text = String(args.text ?? "");
+    if (text.trim().length < 8) return textResult({ error: "Paste the seat's completion." }, true);
+    return textResult(await fillOrchestraSeat(sessionId, String(args.seat ?? ""), text));
   }
   return textResult({ error: `Unknown tool ${name}` }, true);
 }

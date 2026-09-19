@@ -27,7 +27,7 @@ describe("handleMcp", () => {
     };
     assert.deepEqual(
       res.result.tools.map((t) => t.name),
-      ["chorus_labs", "chorus_exam", "chorus_score", "chorus_sitting", "chorus_new_sitting", "chorus_pairs", "chorus_ledger"],
+      ["chorus_labs", "chorus_exam", "chorus_score", "chorus_sitting", "chorus_next", "chorus_fill", "chorus_new_sitting", "chorus_pairs", "chorus_ledger"],
     );
   });
 
@@ -210,6 +210,55 @@ describe("handleMcp", () => {
     )) as { result: { content: { text: string }[] } };
     const payload = JSON.parse(second.result.content[0]!.text) as { pair: { contaminated: boolean } | null };
     assert.equal(payload.pair?.contaminated, true);
+  });
+
+  it("conducts seats over chorus_next and chorus_fill", async () => {
+    await dropSession("orch-session");
+    const sid = { sessionId: "orch-session", protocol: "2025-03-26" };
+    await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 20,
+        method: "tools/call",
+        params: { name: "chorus_sitting", arguments: { conduct: true, goal: "Harden the review prompt", labId: "prompt" } },
+      },
+      sid,
+    );
+    const next = (await handleMcp(
+      { jsonrpc: "2.0", id: 21, method: "tools/call", params: { name: "chorus_next", arguments: {} } },
+      sid,
+    )) as { result: { content: { text: string }[] } };
+    const seat = JSON.parse(next.result.content[0]!.text) as { seat: string };
+    assert.equal(seat.seat, "conductor");
+    await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 22,
+        method: "tools/call",
+        params: {
+          name: "chorus_fill",
+          arguments: {
+            seat: "conductor",
+            text: JSON.stringify({
+              contract: "Catch XSS and SQL.",
+              whyThisSplit: "Three surfaces.",
+              specialists: [
+                { id: "s1", name: "Sink Hunter", mandate: "Find sinks", lens: "code" },
+                { id: "s2", name: "Query Adversary", mandate: "SQL", lens: "query" },
+                { id: "s3", name: "Eval Warden", mandate: "eval", lens: "runtime" },
+              ],
+            }),
+          },
+        },
+      },
+      sid,
+    );
+    const second = (await handleMcp(
+      { jsonrpc: "2.0", id: 23, method: "tools/call", params: { name: "chorus_next", arguments: {} } },
+      sid,
+    )) as { result: { content: { text: string }[] } };
+    const s1 = JSON.parse(second.result.content[0]!.text) as { seat: string };
+    assert.equal(s1.seat, "s1");
   });
 
   it("initialize is idempotent", async () => {

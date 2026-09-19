@@ -12,7 +12,7 @@ import {
 import { MAX_GENERATIONS, MIN_GOAL } from "./labs";
 import { maxFixtureLevel } from "./fixtures";
 import { gradeArtifact } from "./grade";
-import { publicMcpUrl } from "./mcp-url";
+import { loadMcpSit, publicMcpUrl } from "./mcp-url";
 import { pairsJsonl, pairsJsonlClean, trainingJson } from "./pairs";
 import { recurseTarget, unique, formatArtifact, sittingArtifact, judgeFromFixture } from "./ledger";
 import { resolveExecutor } from "./slot";
@@ -250,10 +250,22 @@ export async function executeSwarm() {
       );
     }
     try {
+      const sit = loadMcpSit();
+      await fetch(`/api/sitting?sit=${encodeURIComponent(sit)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          conduct: true,
+          labId: state.labId,
+          goal: state.goal,
+          pasted: state.pasted,
+        }),
+      });
+      useChorus.getState().bumpMcpSit();
       await navigator.clipboard.writeText(publicMcpUrl());
-      toast.message("MCP URL copied. Connect it in Grok, Claude, or Cursor.");
+      toast.message("Chorus is conducting. MCP host: chorus_next, then chorus_fill, until done.");
     } catch {
-      toast.message(`Connect ${publicMcpUrl()} in Grok, Claude, or Cursor.`);
+      toast.message(`Connect ${publicMcpUrl()} then chorus_next.`);
     }
     return;
   }
@@ -353,10 +365,21 @@ export async function recurseSwarm() {
   const state = useChorus.getState();
   if (state.lane === "mcp") {
     try {
+      await fetch(`/api/sitting?sit=${encodeURIComponent(loadMcpSit())}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          conduct: true,
+          labId: state.labId,
+          goal: state.goal,
+          pasted: state.pasted,
+        }),
+      });
+      useChorus.getState().bumpMcpSit();
       await navigator.clipboard.writeText(publicMcpUrl());
-      toast.message("MCP URL copied. Recurse in the host with chorus_score.");
+      toast.message("Recurse queued. Host: chorus_next until done.");
     } catch {
-      toast.message("Recurse in the MCP host with chorus_score.");
+      toast.message("Recurse in the MCP host with chorus_next.");
     }
     return;
   }

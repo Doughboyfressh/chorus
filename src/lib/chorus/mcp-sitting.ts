@@ -1,6 +1,17 @@
 import { validSitId } from "./mcp-url.ts";
 import type { PreferencePair } from "./pairs.ts";
 import type { Agent, EvalResult, Generation, SwarmRun } from "./types.ts";
+import {
+  applyFill,
+  gradeMerge,
+  mergeDeliverable,
+  orchestraAgents,
+  orchestraStaff,
+  pendingSeat,
+  seatPrompt,
+  startOrchestraState,
+  type Orchestra,
+} from "./orchestra.ts";
 
 export type McpSitting = {
   id: string;
@@ -14,6 +25,7 @@ export type McpSitting = {
   specialists?: { id: string; name: string; mandate: string }[];
   patches?: { specialist: string; patch: string }[];
   merge?: string;
+  orchestra?: Orchestra;
   scores: {
     artifact: string;
     score: number;
@@ -209,6 +221,7 @@ function asEval(row: McpSitting["scores"][number], labId: string, level: number)
 }
 
 function agentsFromSitting(sitting: McpSitting): Agent[] {
+  if (sitting.orchestra) return orchestraAgents(sitting.orchestra);
   const staff = (sitting.specialists ?? []).slice(0, 3);
   const patchOf = (name: string) =>
     [...(sitting.patches ?? [])].reverse().find((row) => row.specialist.toLowerCase() === name.toLowerCase())?.patch;
@@ -318,6 +331,9 @@ export async function sittingSnapshot(sessionId: string) {
     specialists: (sitting.specialists ?? []).map((row) => row.name),
     contract: Boolean(sitting.contract),
     patches: sitting.patches?.length ?? 0,
+    orchestra: sitting.orchestra
+      ? { mode: sitting.orchestra.mode, pending: pendingSeat(sitting.orchestra), filled: Object.keys(sitting.orchestra.filled) }
+      : null,
   };
 }
 
@@ -332,6 +348,9 @@ export async function applySittingUpdate(
     patch?: string;
     merge?: string;
     executor?: string;
+    conduct?: boolean;
+    goal?: string;
+    pasted?: string;
   },
 ) {
   const existing = bySession.get(sessionId) ?? (await loadFromDb(sessionId));
@@ -358,8 +377,76 @@ export async function applySittingUpdate(
     ].slice(-12);
   }
   if (args.merge?.trim()) sitting.merge = args.merge.trim().slice(0, 24_000);
+  if (args.conduct) {
+    sitting.orchestra = startOrchestraState({
+      goal: args.goal || sitting.labId,
+      pasted: args.pasted || sitting.current || sitting.artifact0,
+      recurse: sitting.scores.length > 0,
+    });
+  }
   await saveToDb(sitting);
   return sitting;
+}
+
+export async function nextOrchestraSeat(sessionId: string) {
+  const sitting = await sittingFor(sessionId);
+  if (!sitting.orchestra) {
+    return { error: "No conducted sitting. chorus_sitting with conduct:true, or Run in the lab." };
+  }
+  const seat = pendingSeat(sitting.orchestra);
+  if (!seat) {
+    return { done: true, pairCount: sitting.pairs.length, generations: sitting.scores.length };
+  }
+  return { done: false, ...seatPrompt(sitting.orchestra, seat) };
+}
+
+export async function fillOrchestraSeat(sessionId: string, seat: string, text: string) {
+  const sitting = await sittingFor(sessionId);
+  if (!sitting.orchestra) {
+    return { error: "No conducted sitting." };
+  }
+  const pending = pendingSeat(sitting.orchestra);
+  if (!pending) return { error: "Every seat is filled.", done: true };
+  if (seat && seat !== pending) {
+    return { error: `Fill ${pending} next.`, pending };
+  }
+  sitting.orchestra = applyFill(sitting.orchestra, pending, text);
+  const staff = orchestraStaff(sitting.orchestra);
+  if (staff) {
+    sitting.contract = staff.contract;
+    sitting.specialists = staff.specialists.map((row) => ({
+      id: row.id,
+      name: row.name,
+      mandate: row.mandate,
+    }));
+  }
+  if (pending === "synthesizer") {
+    sitting.merge = sitting.orchestra.filled.synthesizer;
+    const graded = gradeMerge(sitting.orchestra, sitting.labId, sitting.level);
+    if (graded) {
+      const recorded = await recordScore(
+        sessionId,
+        mergeDeliverable(sitting.orchestra) || text,
+        graded,
+        sitting.orchestra.goal,
+        sitting.executor,
+      );
+      recorded.sitting.orchestra = sitting.orchestra;
+      await saveToDb(recorded.sitting);
+      const next = pendingSeat(recorded.sitting.orchestra!);
+      return {
+        filled: pending,
+        pending: next,
+        done: !next,
+        graded,
+        pair: recorded.pair,
+        generation: recorded.sitting.scores.length,
+      };
+    }
+  }
+  await saveToDb(sitting);
+  const next = pendingSeat(sitting.orchestra);
+  return { filled: pending, pending: next, done: !next };
 }
 
 export async function sittingPairs(sessionId: string) {

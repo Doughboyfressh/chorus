@@ -113,15 +113,15 @@ export function ModelSlotPanel() {
       {lane === "mcp" ? (
         <div className="mt-3">
           <p className="text-sm leading-relaxed text-muted">
-            No key in Chorus. The host writes. Chorus grades. The URL is this sitting — treat it
-            like a secret.
+            Chorus conducts. The host plays the eight seats. No key in Chorus. The URL is this
+            sitting — treat it like a secret.
           </p>
           <ol className="mt-3 list-decimal space-y-1 pl-4 text-sm leading-relaxed text-muted">
             <li>Pick a lab. Paste the artifact you already use as gen 0.</li>
             <li>Score gen 0 here. A low number means the plants are still open. That is the start.</li>
-            <li>Copy this URL into Grok → Connectors → Custom. Transport: Streamable HTTP. Auth: none.</li>
-            <li>Tell the host: run the Chorus sitting. Score a weak gen 0 first.</li>
-            <li>This tab polls the same sitting. When the score rises, export the pairs.</li>
+            <li>Copy this URL into Grok, Claude, ChatGPT, or Cursor → MCP / Connectors. Transport: Streamable HTTP. Auth: none.</li>
+            <li>Run in this tab, or tell the host: chorus_next then chorus_fill until done.</li>
+            <li>This tab polls the plate. Seats fill as the host plays them.</li>
             <li>New sitting wipes this URL in place. Grok stays connected.</li>
             <li>A domain is a Vercel alias when you have one. The sitting URL is the account.</li>
           </ol>

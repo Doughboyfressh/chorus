@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { resetSitting, sittingFor, sittingPairs, sittingToRun, validSitId } from "@/lib/chorus/mcp-sitting";
+import { applySittingUpdate, resetSitting, sittingFor, sittingPairs, sittingToRun, validSitId } from "@/lib/chorus/mcp-sitting";
 
 function sameOrigin(request: Request) {
   const site = request.headers.get("sec-fetch-site");
@@ -53,13 +53,25 @@ export const Route = createFileRoute("/api/sitting")({
             headers: { "content-type": "application/json" },
           });
         }
-        let labId = "";
+        let body: { labId?: string; reset?: boolean; conduct?: boolean; goal?: string; pasted?: string } = {};
         try {
-          const body = (await request.json()) as { labId?: string; reset?: boolean };
-          if (typeof body.labId === "string" && body.labId.trim()) labId = body.labId.trim();
+          body = (await request.json()) as typeof body;
         } catch {
           /* empty body is a reset */
         }
+        if (body.conduct) {
+          const sitting = await applySittingUpdate(sit, {
+            conduct: true,
+            labId: typeof body.labId === "string" ? body.labId : undefined,
+            goal: body.goal,
+            pasted: body.pasted,
+          });
+          return new Response(JSON.stringify({ id: sitting.id, labId: sitting.labId, orchestra: true }), {
+            status: 200,
+            headers: { "content-type": "application/json", "cache-control": "no-store" },
+          });
+        }
+        const labId = typeof body.labId === "string" && body.labId.trim() ? body.labId.trim() : "";
         const existing = await sittingFor(sit);
         const sitting = await resetSitting(sit, labId || existing.labId || "rsi");
         return new Response(
