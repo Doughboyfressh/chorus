@@ -357,7 +357,7 @@ export function orchestraAgents(orch: Orchestra): Agent[] {
     },
     { id: "critic", role: "critic", name: "Critic", mandate: "Find holes." },
     { id: "synthesizer", role: "synthesizer", name: "Synthesizer", mandate: "Merge survivors." },
-    { id: "exam", role: "critic", name: "Exam", mandate: "Run the artifact on the held-out input." },
+    { id: "exam", role: "critic", name: "Exam", mandate: "Run the artifact on the public practice input; this is unverified." },
     { id: "improver", role: "improver", name: "Improver", mandate: "Close open holes." },
     { id: "judge", role: "judge", name: "Judge", mandate: "Did holes close." },
   ];

@@ -88,26 +88,30 @@ export function Synthesis() {
       ) : null}
 
       <ComparePlate />
+      <p role="status" className="mb-4 rounded-xl bg-surface-2 p-4 text-sm text-warn">
+        Practice mode: public fixtures are diagnostic, not independent validation.
+        All results, including legacy runs, are unverified. Clean training export is locked.
+      </p>
 
       {evaluation ? (
         <div className="mb-6 rounded-xl bg-surface-2 p-4">
           <p className="font-mono text-xs uppercase tracking-widest text-subtle">
-            Fixture v{(evaluation.level ?? 0) + 1}
+            Public practice v{(evaluation.level ?? 0) + 1}
             {evaluation.mutated ? " · mutated" : ""} · gen {viewingN}
           </p>
-          <p className="mt-2 font-display text-2xl leading-tight text-fg">{evaluation.score}/100</p>
+          <p className="mt-2 font-display text-2xl leading-tight text-fg">{evaluation.score}/100 · unverified</p>
           <p className="mt-1 text-sm text-muted">{evaluation.fixture}</p>
           {evaluation.executor ? (
             <p className="mt-1 text-sm text-muted">
               Executor: {evaluation.executor}
-              {evaluation.contaminated ? " · same weights as the writer — pair is contaminated" : " · held-out"}
+              {" · claimed executor; independence is not verified"}
             </p>
           ) : null}
           {evaluation.quoteHint ? (
             <p className="mt-2 text-sm leading-relaxed text-warn">{evaluation.quoteHint}</p>
           ) : null}
           {evaluation.exhausted ? (
-            <p className="mt-2 text-sm leading-relaxed text-ok">Fixture exhausted. Export the pairs.</p>
+            <p className="mt-2 text-sm leading-relaxed text-ok">Public practice ladder completed. Independent validation is still required.</p>
           ) : null}
           {evaluation.evidence ? (
             <p className="mt-2 text-sm leading-relaxed text-muted">{evaluation.evidence}</p>
@@ -132,7 +136,7 @@ export function Synthesis() {
           ) : null}
         </div>
       ) : run?.phase === "eval" ? (
-        <p className="mb-6 font-display text-lg text-muted">Scoring the held-out fixture.</p>
+        <p className="mb-6 font-display text-lg text-muted">Running the public practice fixture.</p>
       ) : null}
 
       {delta && viewingN > 1 ? (
@@ -176,10 +180,10 @@ export function Synthesis() {
                 <Button onClick={() => seedFrom(run)}>Continue loop</Button>
               ) : null}
               <Button variant="secondary" size="sm" onClick={() => downloadPairs()} disabled={!hasPairs}>
-                Pairs
+                Review candidates
               </Button>
-              <Button variant="secondary" size="sm" onClick={() => downloadTraining()} disabled={!hasPairs}>
-                Train
+              <Button variant="secondary" size="sm" onClick={() => downloadTraining()} disabled title="Requires independently verified private-holdout comparison">
+                Training locked
               </Button>
               <Button variant="secondary" size="sm" onClick={() => void copyPlaybook()}>
                 {copied ? <Check /> : <Copy />}

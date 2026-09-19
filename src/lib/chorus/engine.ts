@@ -1,7 +1,7 @@
+import { boundedText, MAX_ARTIFACT, MAX_USER_TEST } from "./integrity.ts";
 import type { ChatFn } from "./completions";
-import { examFor, gradeArtifact } from "./grade";
-import { maxFixtureLevel } from "./fixtures";
-import { asString, asStringList, extractJson } from "./parse";
+import { examFor, gradeArtifact } from "./grade.ts";
+import { asString, asStringList, extractJson } from "./parse.ts";
 import type {
   AiResult,
   ConductResult,
@@ -15,7 +15,7 @@ import type {
   JudgeVerdict,
   SpecialistBrief,
   SynthesisResult,
-} from "./types";
+} from "./types.ts";
 
 function clampGoal(goal: string) {
   const trimmed = goal.trim();
@@ -176,7 +176,7 @@ export async function critiqueSwarm(
     temperature: 0.3,
     maxTokens: 700,
     user: `You are the Critic. Find holes, overlap, and confident-wrong claims. Kill weak work.
-The fixture is the ground truth. If the fixture still fails, those failures ARE the holes.
+The public fixture supplies development feedback, not independent ground truth. Investigate its failures as candidate holes.
 
 Contract:
 ${data.contract}
@@ -470,7 +470,7 @@ export async function judgeSwarm(
 Goal:
 ${clampGoal(data.goal)}
 
-FIXTURE SCORES (held-out, not the swarm's opinion):
+PUBLIC PRACTICE SCORES (unverified; not private holdout evidence):
 Generation ${data.previous.n}: ${Number.isFinite(data.previous.fixtureScore) ? data.previous.fixtureScore : "n/a"} / 100
 Generation ${data.current.n}: ${Number.isFinite(data.current.fixtureScore) ? data.current.fixtureScore : "n/a"} / 100
 Still failing: ${(data.current.fixtureFailed ?? []).join("; ") || "none listed"}
@@ -530,8 +530,8 @@ Return JSON:
     }
     return {
       ok: true,
-      verdict,
-      score: asString(parsed.score, "The judge could not tell if anything closed."),
+      verdict: "stalled",
+      score: "Unverified model opinion, not independent evidence: " + asString(parsed.score, "No verified comparison."),
       holes,
     };
   } catch {
@@ -550,7 +550,10 @@ export async function evaluateArtifact(
   },
   chat: ChatFn,
 ): Promise<AiResult<EvalResult>> {
-  const level = Math.max(0, Math.min(maxFixtureLevel(data.labId), Number(data.level) || 0));
+  boundedText(data.deliverable, "artifact", MAX_ARTIFACT, 1);
+  boundedText(data.title, "title", 2000);
+  boundedText(data.userTest ?? "", "userTest", MAX_USER_TEST);
+  const level = data.level ?? 0;
   const exam = examFor(data.labId, level, data.userTest);
   let findings: string | undefined;
   if (exam.execute) {
@@ -558,7 +561,7 @@ export async function evaluateArtifact(
       temperature: 0.1,
       maxTokens: 700,
       timeoutMs: 45_000,
-      system: `${data.title}\n${data.deliverable}`.slice(0, 2400) +
+      system: `${data.title}\n${data.deliverable}` +
         `\n\nReturn JSON only: { "findings": [{ "issue": "one line", "quote": "exact source line" }] }.`,
       user: `${exam.task}\n\nEach finding must quote an exact line from the source. Do not paraphrase the line.\n\n${exam.input}`,
     });
@@ -571,7 +574,7 @@ export async function evaluateArtifact(
         userTest: data.userTest,
         level,
       });
-      return { ok: true, ...graded, evidence: `Fixture run failed (${executed.error}). Checklist only.` };
+      return { ok: true, ...graded, evidence: `Practice execution failed (${executed.error}). No execution credit.` };
     }
   }
   return {

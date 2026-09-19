@@ -34,6 +34,7 @@ describe("preferencePairs", () => {
             pattern: { contract: "", fanout: "", critique: "", merge: "" },
           },
           evaluation: {
+            integrityVersion: 2, testKey: "same-public-test", executionContext: "same-unverified-executor",
             labId: "prompt",
             fixture: "v1",
             score: 40,
@@ -56,6 +57,7 @@ describe("preferencePairs", () => {
             pattern: { contract: "", fanout: "", critique: "", merge: "" },
           },
           evaluation: {
+            integrityVersion: 2, testKey: "same-public-test", executionContext: "same-unverified-executor",
             labId: "prompt",
             fixture: "v1",
             score: 80,
@@ -73,6 +75,8 @@ describe("preferencePairs", () => {
     assert.equal(pairs[0]?.chosen, "strong");
     assert.equal(pairs[0]?.rejected, "weak");
     assert.equal(pairs[0]?.model, "grok-4.5");
+    assert.equal(pairs[0]?.contaminated, true);
+    assert.equal(trainingPack(sitting).dpoClean.length, 0);
   });
 
   it("skips a stall", () => {
@@ -91,6 +95,7 @@ describe("preferencePairs", () => {
             pattern: { contract: "", fanout: "", critique: "", merge: "" },
           },
           evaluation: {
+            integrityVersion: 2, testKey: "same-public-test", executionContext: "same-unverified-executor",
             labId: "prompt",
             fixture: "v1",
             score: 50,
@@ -113,6 +118,7 @@ describe("preferencePairs", () => {
             pattern: { contract: "", fanout: "", critique: "", merge: "" },
           },
           evaluation: {
+            integrityVersion: 2, testKey: "same-public-test", executionContext: "same-unverified-executor",
             labId: "prompt",
             fixture: "v1",
             score: 50,

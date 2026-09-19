@@ -1,3 +1,4 @@
+import { boundedText } from "./integrity.ts";
 import { createServerFn } from "@tanstack/react-start";
 import { assertSafeRemoteResolved, postChat, type ChatResult } from "./completions";
 type ProxySlot =
@@ -15,11 +16,11 @@ type ProxyInput = {
 
 export const proxyChat = createServerFn({ method: "POST" })
   .validator((input: ProxyInput) => ({
-    user: String(input.user ?? "").slice(0, 12_000),
+    user: boundedText(input.user, "user", 20_000, 1),
     maxTokens: Math.min(2000, Math.max(64, Number(input.maxTokens) || 400)),
     temperature: Number(input.temperature) || 0.3,
     timeoutMs: Math.min(90_000, Math.max(5_000, Number(input.timeoutMs) || 55_000)),
-    system: input.system ? String(input.system).slice(0, 4_000) : undefined,
+    system: input.system === undefined ? undefined : boundedText(input.system, "system", 30_000),
     slot: {
       ...input.slot,
       ...(input.slot.mode === "custom"

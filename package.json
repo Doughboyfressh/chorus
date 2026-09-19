@@ -16,9 +16,10 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/chorus/fixtures.test.ts src/lib/chorus/pairs.test.ts src/lib/chorus/slot.test.ts src/lib/chorus/ledger.test.ts src/lib/chorus/mcp.test.ts",
+    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/chorus/*.test.ts && npm run test:integrity:db",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test:integrity:db": "node --experimental-strip-types --test tests/chorus-storage.test.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

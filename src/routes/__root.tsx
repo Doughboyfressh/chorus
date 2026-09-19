@@ -14,7 +14,7 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "The recursive improvement company. A swarm that rewrites its contract, scored by a held-out fixture. Any model.",
+          "The recursive improvement company. A swarm that rewrites its contract, scored by a public practice fixture. Any model.",
       },
       { name: "theme-color", content: "#0c0d0c" },
     ],

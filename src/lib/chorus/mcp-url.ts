@@ -6,12 +6,12 @@ function newSit() {
   }
   const bytes = new Uint8Array(16);
   if (typeof crypto !== "undefined" && crypto.getRandomValues) crypto.getRandomValues(bytes);
-  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  else throw new Error("A secure context with cryptographic randomness is required.");
   return [...bytes].map((n) => n.toString(16).padStart(2, "0")).join("");
 }
 
 export function validSitId(id: string) {
-  return /^[a-zA-Z0-9_-]{8,80}$/.test(id);
+  return /^(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/i.test(id);
 }
 
 export function sitFromText(raw: string) {

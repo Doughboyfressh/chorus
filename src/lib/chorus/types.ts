@@ -102,6 +102,12 @@ export type JudgeResult = {
 };
 
 export type EvalResult = {
+  integrityVersion?: number;
+  testKey?: string;
+  executionContext?: string;
+  scoreKind?: "diagnostic";
+  verified?: false;
+  integrityNote?: string;
   labId: string;
   fixture: string;
   score: number;

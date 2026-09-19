@@ -116,13 +116,13 @@ describe("sittingArtifact", () => {
 });
 
 describe("judgeFromFixture", () => {
-  it("closes holes only when the fixture drops them", () => {
+  it("does not certify closure from unverified fixture output", () => {
     const judged = judgeFromFixture(
       { score: 40, failed: ["Caught XSS", "Caught SQL"] },
       { score: 80, failed: ["Caught SQL"] },
     );
-    assert.equal(judged.verdict, "improved");
-    assert.equal(judged.holes.find((h) => h.hole === "Caught XSS")?.status, "closed");
+    assert.equal(judged.verdict, "stalled");
+    assert.equal(judged.holes.find((h) => h.hole === "Caught XSS")?.status, "open");
     assert.equal(judged.holes.find((h) => h.hole === "Caught SQL")?.status, "open");
   });
 

@@ -28,12 +28,12 @@ function sittingLabel(run: SwarmRun) {
   const target = recurseTarget(run);
   const gen = run.generation ?? 1;
   const open = target.attack.length;
-  const verdict = target.verdict === "none" ? "unjudged" : target.verdict;
+  const verdict = "independent improvement unverified";
   const score = run.evaluation?.score;
   const model = run.slotSnapshot?.model;
   const bits = [
     `Gen ${gen}`,
-    typeof score === "number" ? `${score}/100` : null,
+    typeof score === "number" ? `${score}/100 · unverified` : null,
     model ?? null,
     `${open} open`,
     verdict,
