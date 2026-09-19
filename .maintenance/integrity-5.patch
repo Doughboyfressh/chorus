@@ -1,0 +1,387 @@
+diff --git a/src/lib/chorus/mcp.ts b/src/lib/chorus/mcp.ts
+index d723313..d4f07bd 100644
+--- a/src/lib/chorus/mcp.ts
++++ b/src/lib/chorus/mcp.ts
+@@ -0,0 +1 @@
++import { boundedText, cleanTrainingRows, MAX_ARTIFACT, MAX_FINDINGS } from "./integrity.ts";
+@@ -3 +4 @@ import { examFor, gradeArtifact } from "./grade.ts";
+-import { applySittingUpdate, dropSession, examReady, fillOrchestraSeat, markExam, nextOrchestraSeat, recordScore, resetSitting, sittingFor, sittingPairs, sittingSnapshot, sittingToRun } from "./mcp-sitting.ts";
++import { applySittingUpdate, dropSession, consumeExam, fillOrchestraSeat, markExam, nextOrchestraSeat, recordScore, resetSitting, sittingFor, sittingPairs, sittingSnapshot, sittingToRun } from "./mcp-sitting.ts";
+@@ -36 +37 @@ function textResult(payload: unknown, isError = false) {
+-const SITTING_PROMPT = `You are an MCP host for Chorus. Chorus conducts. You play the seats. Chorus grades.
++const SITTING_PROMPT = `You are an MCP host for Chorus. Chorus conducts. You play the seats. Chorus reports unverified practice diagnostics.
+@@ -42,2 +43,2 @@ Otherwise a host sitting:
+-2. chorus_exam first. You are the artifact; exam.input is the user message. Then chorus_score with the findings that run produced. Scoring without exam is rejected.
+-3. A later score beating an earlier one writes a pair only if the artifact text changed. Same spec, new JSON is not a pair.
++2. chorus_exam with the exact artifact first; preserve its attemptId for chorus_score. You are the artifact; exam.input is the user message. Then chorus_score with the findings that run produced. Scoring without exam is rejected.
++3. A later diagnostic can produce a contaminated review candidate only on the same test and changed text. It is not evidence of independent improvement. Clean training exports are unavailable.
+@@ -51 +52 @@ const TOOLS = [
+-    description: "List Chorus labs. You are the model. Chorus grades.",
++    description: "List Chorus labs. You are the model. Chorus reports unverified practice diagnostics.",
+@@ -57 +58 @@ const TOOLS = [
+-      "Held-out fixture. You are the artifact; run task+input. Required before chorus_score on execute labs.",
++      "Public practice fixture. Supply the exact artifact before seeing the input. Returns a single-use attemptId required by chorus_score.",
+@@ -60,0 +62 @@ const TOOLS = [
++        artifact: { type: "string", description: "Exact artifact to freeze for this attempt." },
+@@ -64,0 +67 @@ const TOOLS = [
++      required: ["artifact"],
+@@ -70 +73 @@ const TOOLS = [
+-      "Grade an artifact and record it on this sitting. A higher score than last time emits a preference pair.",
++      "Record unverified diagnostics for the exact artifact and test bound to a single-use attemptId. Cannot certify clean training data.",
+@@ -75,0 +79 @@ const TOOLS = [
++        attemptId: { type: "string", description: "Unused attemptId returned by chorus_exam for this exact artifact and test." },
+@@ -80 +84 @@ const TOOLS = [
+-        executor: { type: "string", description: "Model that sat the exam. Omit if this host ran it (pair is contaminated)." },
++        executor: { type: "string", description: "Claimed executor for display only. Never establishes independent execution." },
+@@ -83 +87 @@ const TOOLS = [
+-      required: ["artifact"],
++      required: ["artifact", "attemptId"],
+@@ -125,0 +130 @@ const TOOLS = [
++        attemptId: { type: "string", description: "Required for the exam seat; returned by chorus_next." },
+@@ -154,2 +159 @@ export async function handleMcp(body: unknown, ctx: McpCtx): Promise<unknown | n
+-    const out = await Promise.all(body.map((item) => handleMcp(item, ctx)));
+-    return out.filter((item) => item != null);
++    return fail(null, "Submit one request at a time; batches are not accepted.");
+@@ -193 +197,5 @@ export async function handleMcp(body: unknown, ctx: McpCtx): Promise<unknown | n
+-      return ok(msg.id, await callTool(msg.params ?? {}, ctx));
++      try {
++        return ok(msg.id, await callTool(msg.params ?? {}, ctx));
++      } catch (err) {
++        return ok(msg.id, textResult({ error: err instanceof Error ? err.message : "Request rejected" }, true));
++      }
+@@ -211,4 +219,7 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-    const labId = args.labId ? String(args.labId) : sitting.labId || "prompt";
+-    const level = Number.isFinite(Number(args.level)) ? Number(args.level) : sitting.level;
+-    await markExam(sessionId, labId, level);
+-    return textResult(examFor(labId, level, args.userTest ? String(args.userTest) : undefined));
++    const labId = args.labId === undefined ? sitting.labId : String(args.labId);
++    const level = args.level === undefined ? sitting.level : args.level as number;
++    const artifact = boundedText(args.artifact, "artifact", MAX_ARTIFACT, 8);
++    const userTest = args.userTest === undefined ? undefined : String(args.userTest);
++    const exam = examFor(labId, level, userTest);
++    const attempt = await markExam(sessionId, labId, level, artifact, userTest);
++    return textResult({ ...exam, ...attempt });
+@@ -217,6 +228,2 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-    const artifact = String(args.artifact ?? "");
+-    if (artifact.trim().length < 8) return textResult({ error: "Paste an artifact." }, true);
+-    const sitting = await sittingFor(sessionId);
+-    if (args.reset === true) {
+-      await resetSitting(sessionId, args.labId ? String(args.labId) : sitting.labId);
+-    }
++    if (args.reset === true) return textResult({ error: "Reset explicitly with chorus_sitting, then request a new chorus_exam." }, true);
++    const artifact = boundedText(args.artifact, "artifact", MAX_ARTIFACT, 8);
+@@ -224,5 +231,7 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-    const labId = args.labId ? String(args.labId) : current.labId;
+-    const level = Number.isFinite(Number(args.level)) ? Number(args.level) : current.level;
+-    const exam = examFor(labId, level, args.userTest ? String(args.userTest) : undefined);
+-    if (exam.execute && !examReady(current, labId, level)) {
+-      return textResult({ error: "chorus_exam first. Run exam.input under the artifact, then score those findings." }, true);
++    const labId = args.labId === undefined ? current.labId : String(args.labId);
++    const level = args.level === undefined ? current.level : args.level as number;
++    const userTest = args.userTest === undefined ? undefined : String(args.userTest);
++    examFor(labId, level, userTest);
++    if (typeof args.attemptId !== "string" || !await consumeExam(sessionId,
++      { labId, level, artifact, userTest }, args.attemptId)) {
++      return textResult({ error: "chorus_exam first with this exact artifact and test. Supply its unused, unexpired attemptId." }, true);
+@@ -230,15 +239,4 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-    const graded = gradeArtifact({
+-      labId,
+-      deliverable: artifact,
+-      findings: args.findings ? String(args.findings) : undefined,
+-      userTest: args.userTest ? String(args.userTest) : undefined,
+-      level,
+-    });
+-    const recorded = await recordScore(
+-      sessionId,
+-      artifact,
+-      graded,
+-      args.goal ? String(args.goal) : "",
+-      args.executor ? String(args.executor) : undefined,
+-    );
+-    const exhausted = Boolean(graded.exhausted);
++    const findings = args.findings === undefined ? undefined : boundedText(args.findings, "findings", MAX_FINDINGS);
++    const graded = gradeArtifact({ labId, deliverable: artifact, findings, userTest, level });
++    const recorded = await recordScore(sessionId, artifact, graded,
++      args.goal ? String(args.goal) : "", args.executor ? String(args.executor) : undefined);
+@@ -246,13 +244,7 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-      ...graded,
+-      sittingId: recorded.sitting.id,
+-      pair: recorded.pair,
+-      pairCount: recorded.sitting.pairs.length,
+-      generation: recorded.sitting.scores.length,
+-      capped: recorded.capped ?? false,
+-      exhausted,
+-      nextLevel: exhausted ? null : graded.level + 1,
+-      hint: recorded.capped
+-        ? "Generation cap 8. chorus_new_sitting or chorus_score with reset:true. Same URL."
+-        : exhausted
+-          ? "Fixture exhausted. chorus_pairs for the JSONL. chorus_new_sitting to start another lab."
+-          : graded.quoteHint,
++      ...recorded.graded, sittingId: recorded.sitting.id, pair: recorded.pair,
++      pairCount: recorded.sitting.pairs.length, cleanPairCount: 0,
++      generation: recorded.sitting.scores.length, capped: recorded.capped,
++      exhausted: Boolean(graded.exhausted),
++      nextLevel: graded.exhausted ? null : recorded.sitting.level,
++      hint: recorded.capped ? "Generation cap 8. Reset explicitly to start a new sitting." :
++        graded.exhausted ? "Public practice ladder completed. This is not independent validation; clean training export is disabled." : graded.quoteHint,
+@@ -303 +295 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-    const clean = pairs.filter((row) => !row.contaminated);
++    const clean = cleanTrainingRows(pairs);
+@@ -323 +315,2 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-    return textResult(await fillOrchestraSeat(sessionId, String(args.seat ?? ""), text));
++    boundedText(text, "completion", MAX_FINDINGS, 8);
++    return textResult(await fillOrchestraSeat(sessionId, String(args.seat ?? ""), text, typeof args.attemptId === "string" ? args.attemptId : undefined));
+diff --git a/src/lib/chorus/orchestra.ts b/src/lib/chorus/orchestra.ts
+index 6fea101..1a040bb 100644
+--- a/src/lib/chorus/orchestra.ts
++++ b/src/lib/chorus/orchestra.ts
+@@ -360 +360 @@ export function orchestraAgents(orch: Orchestra): Agent[] {
+-    { id: "exam", role: "critic", name: "Exam", mandate: "Run the artifact on the held-out input." },
++    { id: "exam", role: "critic", name: "Exam", mandate: "Run the artifact on the public practice input; this is unverified." },
+diff --git a/src/lib/chorus/pairs.test.ts b/src/lib/chorus/pairs.test.ts
+index 9fcba33..725700e 100644
+--- a/src/lib/chorus/pairs.test.ts
++++ b/src/lib/chorus/pairs.test.ts
+@@ -36,0 +37 @@ describe("preferencePairs", () => {
++            integrityVersion: 2, testKey: "same-public-test", executionContext: "same-unverified-executor",
+@@ -58,0 +60 @@ describe("preferencePairs", () => {
++            integrityVersion: 2, testKey: "same-public-test", executionContext: "same-unverified-executor",
+@@ -75,0 +78,2 @@ describe("preferencePairs", () => {
++    assert.equal(pairs[0]?.contaminated, true);
++    assert.equal(trainingPack(sitting).dpoClean.length, 0);
+@@ -93,0 +98 @@ describe("preferencePairs", () => {
++            integrityVersion: 2, testKey: "same-public-test", executionContext: "same-unverified-executor",
+@@ -115,0 +121 @@ describe("preferencePairs", () => {
++            integrityVersion: 2, testKey: "same-public-test", executionContext: "same-unverified-executor",
+diff --git a/src/lib/chorus/pairs.ts b/src/lib/chorus/pairs.ts
+index 6ba60c9..9314156 100644
+--- a/src/lib/chorus/pairs.ts
++++ b/src/lib/chorus/pairs.ts
+@@ -1 +1,2 @@
+-import type { SwarmRun } from "./types";
++import type { EvalResult, SwarmRun } from "./types.ts";
++import { artifactKey, cleanTrainingRows, comparableDiagnostics, INTEGRITY_NOTE } from "./integrity.ts";
+@@ -13,0 +15,2 @@ export type PreferencePair = {
++  verified?: false;
++  integrityNote?: string;
+@@ -15,0 +19,20 @@ export type PreferencePair = {
++/** Candidate for HUMAN REVIEW only; never a certified preference or training row. */
++export function diagnosticPair(args: {
++  prompt: string; rejected: string; chosen: string; previous?: EvalResult; current?: EvalResult;
++  model: string; generation: number;
++}): PreferencePair | null {
++  const { previous, current } = args;
++  if (!previous || !current || !comparableDiagnostics(previous, current)) return null;
++  if (current.score <= previous.score) return null;
++  const a = artifactKey(args.rejected), b = artifactKey(args.chosen);
++  if (!a || !b || a === b) return null;
++  if (current.failed.some((failure) => !previous.failed.includes(failure))) return null;
++  return {
++    prompt: args.prompt, chosen: args.chosen, rejected: args.rejected,
++    chosen_score: current.score, rejected_score: previous.score, fixture: current.fixture,
++    model: args.model, labId: current.labId, generation: args.generation,
++    // Both sides, public test exposure, and execution provenance remain unverified.
++    contaminated: true, verified: false, integrityNote: INTEGRITY_NOTE,
++  };
++}
++
+@@ -18,2 +41 @@ export function preferencePairs(run: SwarmRun): PreferencePair[] {
+-  const model = run.slotSnapshot?.model ?? "unknown";
+-  const labId = run.labId ?? "generic";
++  const model = run.executorSnapshot?.model ?? run.slotSnapshot?.model ?? "unknown";
+@@ -21,41 +43,13 @@ export function preferencePairs(run: SwarmRun): PreferencePair[] {
+-
+-  if (run.baseline && run.pastedArtifact && gens[0]?.synthesis) {
+-    const chosenScore = gens[0].evaluation?.score ?? 0;
+-    if (chosenScore > run.baseline.score) {
+-      rows.push({
+-        prompt: run.goal,
+-        rejected: run.pastedArtifact,
+-        chosen: gens[0].synthesis.deliverable,
+-        rejected_score: run.baseline.score,
+-        chosen_score: chosenScore,
+-        fixture: gens[0].evaluation?.fixture ?? run.baseline.fixture,
+-        model,
+-        labId,
+-        generation: gens[0].n,
+-        contaminated: Boolean(run.baseline?.contaminated || gens[0].evaluation?.contaminated),
+-      });
+-    }
+-  }
+-
+-  for (let i = 1; i < gens.length; i++) {
+-    const prev = gens[i - 1];
+-    const cur = gens[i];
+-    const prevScore = prev.evaluation?.score;
+-    const curScore = cur.evaluation?.score;
+-    if (typeof prevScore !== "number" || typeof curScore !== "number") continue;
+-    if (curScore <= prevScore) continue;
+-    const rejected = prev.synthesis?.deliverable;
+-    const chosen = cur.synthesis?.deliverable;
+-    if (!rejected || !chosen) continue;
+-    rows.push({
+-      prompt: run.goal,
+-      rejected,
+-      chosen,
+-      rejected_score: prevScore,
+-      chosen_score: curScore,
+-      fixture: cur.evaluation?.fixture ?? prev.evaluation?.fixture ?? "",
+-      model,
+-      labId,
+-      generation: cur.n,
+-      contaminated: Boolean(cur.evaluation?.contaminated || prev.evaluation?.contaminated),
+-    });
++  const candidates = [
++    ...(run.baseline && run.pastedArtifact && gens[0]?.synthesis ? [{
++      rejected: run.pastedArtifact, chosen: gens[0].synthesis.deliverable,
++      previous: run.baseline, current: gens[0].evaluation, generation: gens[0].n,
++    }] : []),
++    ...gens.slice(1).map((cur, i) => ({
++      rejected: gens[i].synthesis?.deliverable ?? "", chosen: cur.synthesis?.deliverable ?? "",
++      previous: gens[i].evaluation, current: cur.evaluation, generation: cur.n,
++    })),
++  ];
++  for (const candidate of candidates) {
++    const pair = diagnosticPair({ ...candidate, prompt: run.goal, model });
++    if (pair) rows.push(pair);
+@@ -67,13 +61 @@ export function pairsJsonl(run: SwarmRun) {
+-  return preferencePairs(run)
+-    .map((row) => JSON.stringify(row))
+-    .join("\n");
+-}
+-
+-export function cleanPairs(run: SwarmRun) {
+-  return preferencePairs(run).filter((row) => !row.contaminated);
+-}
+-
+-export function pairsJsonlClean(run: SwarmRun) {
+-  return cleanPairs(run)
+-    .map((row) => JSON.stringify(row))
+-    .join("\n");
++  return preferencePairs(run).map((row) => JSON.stringify(row)).join("\n");
+@@ -80,0 +63,2 @@ export function pairsJsonlClean(run: SwarmRun) {
++export function cleanPairs(run: SwarmRun) { return cleanTrainingRows(preferencePairs(run)); }
++export function pairsJsonlClean(run: SwarmRun) { return cleanPairs(run).map((row) => JSON.stringify(row)).join("\n"); }
+@@ -83,6 +67,2 @@ export type TrainingPack = {
+-  v: 1;
+-  model: string;
+-  labId: string;
+-  note: string;
+-  dpo: PreferencePair[];
+-  dpoClean: PreferencePair[];
++  v: 1; model: string; labId: string; note: string;
++  dpo: PreferencePair[]; dpoClean: PreferencePair[];
+@@ -91 +70,0 @@ export type TrainingPack = {
+-
+@@ -93,2 +71,0 @@ export function trainingPack(run: SwarmRun): TrainingPack {
+-  const dpo = preferencePairs(run);
+-  const dpoClean = dpo.filter((row) => !row.contaminated);
+@@ -96,12 +73,3 @@ export function trainingPack(run: SwarmRun): TrainingPack {
+-    v: 1,
+-    model: run.slotSnapshot?.model ?? "unknown",
+-    labId: run.labId ?? "generic",
+-    note: "dpoClean is the train set. dpo includes contaminated rows (same model wrote and sat the exam).",
+-    dpo,
+-    dpoClean,
+-    sft: dpoClean.map((row) => ({
+-      messages: [
+-        { role: "user" as const, content: row.prompt },
+-        { role: "assistant" as const, content: row.chosen },
+-      ],
+-    })),
++    v: 1, model: run.slotSnapshot?.model ?? "unknown", labId: run.labId ?? "generic",
++    note: "dpo contains unverified diagnostic candidates for human review ONLY. dpoClean and sft are disabled until a trusted private-holdout A/B evaluator is implemented. " + INTEGRITY_NOTE,
++    dpo: preferencePairs(run), dpoClean: [], sft: [],
+@@ -110,4 +78 @@ export function trainingPack(run: SwarmRun): TrainingPack {
+-
+-export function trainingJson(run: SwarmRun) {
+-  return JSON.stringify(trainingPack(run), null, 2);
+-}
++export function trainingJson(run: SwarmRun) { return JSON.stringify(trainingPack(run), null, 2); }
+diff --git a/src/lib/chorus/run.ts b/src/lib/chorus/run.ts
+index e4a25fe..fbd6d49 100644
+--- a/src/lib/chorus/run.ts
++++ b/src/lib/chorus/run.ts
+@@ -0,0 +1 @@
++import { INTEGRITY_NOTE, quarantine } from "./integrity";
+@@ -16 +17 @@ import { loadMcpSit, publicMcpUrl } from "./mcp-url";
+-import { pairsJsonl, pairsJsonlClean, trainingJson } from "./pairs";
++import { pairsJsonl } from "./pairs";
+@@ -47 +48,2 @@ function stampEval<T extends { score: number; failed: string[] }>(result: T): T
+-  return { ...result, contaminated: resolved.contaminated, executor: resolved.label };
++  return quarantine({ ...result, executor: resolved.label,
++    executionContext: JSON.stringify(["unverified-client", resolved.slot.kind, resolved.slot.baseUrl, resolved.slot.model, 0.1, 700]) });
+@@ -153 +155 @@ async function runEval() {
+-      toast.success("Fixture ladder exhausted. The artifact survived.");
++      toast.success("Public practice ladder completed. Independent validation is still required.");
+@@ -164 +166 @@ async function runEval() {
+-    toast.success("Fixture ladder exhausted. The artifact survived.");
++    toast.success("Public practice ladder completed. Independent validation is still required.");
+@@ -216,4 +218 @@ async function runJudge() {
+-  const judged = judgeFromFixture(previous.evaluation ?? run.baseline, {
+-    score: currEval.score,
+-    failed: currEval.failed,
+-  });
++  const judged = judgeFromFixture(previous.evaluation ?? run.baseline, currEval);
+@@ -254 +253 @@ export async function executeSwarm() {
+-      await fetch(`/api/sitting?sit=${encodeURIComponent(sit)}`, {
++      const response = await fetch(`/api/sitting?sit=${encodeURIComponent(sit)}`, {
+@@ -263,0 +263 @@ export async function executeSwarm() {
++      if (!response.ok) throw new Error("Sitting update was rejected. Check the current lab and reset explicitly if changing labs.");
+@@ -368 +368 @@ export async function recurseSwarm() {
+-      await fetch(`/api/sitting?sit=${encodeURIComponent(loadMcpSit())}`, {
++      const response = await fetch(`/api/sitting?sit=${encodeURIComponent(loadMcpSit())}`, {
+@@ -377,0 +378 @@ export async function recurseSwarm() {
++      if (!response.ok) throw new Error("Sitting update was rejected. Check the current lab and reset explicitly if changing labs.");
+@@ -381,2 +382,2 @@ export async function recurseSwarm() {
+-    } catch {
+-      toast.message("Recurse in the MCP host with chorus_next.");
++    } catch (err) {
++      toast.error(err instanceof Error ? err.message : "Sitting update failed; no successful update was confirmed.");
+@@ -520 +521 @@ export function playbookMarkdown() {
+-          `Verdict: ${snap.judge.verdict}`,
++          `Unverified model opinion (not a validated verdict): ${snap.judge.verdict}`,
+@@ -541 +542 @@ export function playbookMarkdown() {
+-    "## Preference pairs",
++    "## Unverified diagnostic candidates — not training data",
+@@ -550,9 +551,2 @@ export function downloadPairs() {
+-  const clean = pairsJsonlClean(run);
+-  const all = pairsJsonl(run);
+-  const body = clean || all;
+-  if (!body) {
+-    toast.message("No rising scores yet. No pairs to export.");
+-    return;
+-  }
+-  if (clean) toast.message("Exported uncontaminated pairs. Contaminated rows stayed out.");
+-  else toast.message("Every pair is contaminated (same model wrote and sat the exam).");
++  const body = pairsJsonl(run);
++  if (!body) { toast.message("No comparable diagnostic candidates to review."); return; }
+@@ -563 +557 @@ export function downloadPairs() {
+-  a.download = `chorus-pairs-${run.id.slice(0, 8)}.jsonl`;
++  a.download = `chorus-UNVERIFIED-review-${run.id.slice(0, 8)}.jsonl`;
+@@ -565,0 +560 @@ export function downloadPairs() {
++  toast.message("Downloaded unverified review candidates. Do not use them as clean training data.");
+@@ -569,15 +564 @@ export function downloadTraining() {
+-  const run = useChorus.getState().run;
+-  if (!run) return;
+-  const pack = trainingJson(run);
+-  if (pack.includes('"dpo": []')) {
+-    toast.message("No rising scores yet. Nothing to train on.");
+-    return;
+-  }
+-  const blob = new Blob([pack], { type: "application/json" });
+-  const url = URL.createObjectURL(blob);
+-  const a = document.createElement("a");
+-  a.href = url;
+-  a.download = `chorus-train-${run.id.slice(0, 8)}.json`;
+-  a.click();
+-  URL.revokeObjectURL(url);
+-  toast.message("Training pack downloaded. Chorus did not move any weights.");
++  toast.error("Training export is locked. " + INTEGRITY_NOTE);
+diff --git a/src/lib/chorus/slot.ts b/src/lib/chorus/slot.ts
+index dd83ae2..db16ff8 100644
+--- a/src/lib/chorus/slot.ts
++++ b/src/lib/chorus/slot.ts
+@@ -256 +256 @@ export function resolveExecutor(
+-      contaminated: sameWeights(writer, executor),
++      contaminated: true, // Caller-selected endpoints and names are not execution attestation.
