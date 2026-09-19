@@ -84,6 +84,19 @@ export function ghostAgents(): Agent[] {
   ];
 }
 
+export function hostAgents(): Agent[] {
+  return [
+    {
+      id: "host",
+      role: "conductor",
+      name: "MCP host",
+      mandate: "Host writes. Chorus grades.",
+      status: "done",
+      headline: "MCP host",
+    },
+  ];
+}
+
 function normalizeRun(run: SwarmRun): SwarmRun {
   return {
     ...run,
@@ -297,6 +310,7 @@ type Store = {
   pasted: string;
   userTest: string;
   baseline: EvalResult | null;
+  mcpSitEpoch: number;
   setGoal: (goal: string, labId?: string) => void;
   setSelected: (id: string | null) => void;
   setAiAvailable: (v: boolean) => void;
@@ -334,6 +348,7 @@ type Store = {
   fail: (error: string) => void;
   restore: (run: SwarmRun) => void;
   ingestMcpRun: (run: SwarmRun) => void;
+  bumpMcpSit: () => void;
   openFixtureSitting: (evaluation: EvalResult) => void;
   seedFrom: (source: SwarmRun) => void;
   reset: () => void;
@@ -354,6 +369,7 @@ export const useChorus = create<Store>((set, get) => ({
   pasted: "",
   userTest: "",
   baseline: null,
+  mcpSitEpoch: 0,
   setGoal: (goal, labId) => set({ goal, labId }),
   setSelected: (id) => set({ selectedId: id }),
   setAiAvailable: (v) => set({ aiAvailable: v }),
@@ -812,29 +828,12 @@ export const useChorus = create<Store>((set, get) => ({
   },
   ingestMcpRun: (incoming) => {
     const next = normalizeRun(incoming);
-    const phase = get().run?.phase;
-    const busy =
-      phase === "conduct" ||
-      phase === "fanout" ||
-      phase === "critique" ||
-      phase === "merge" ||
-      phase === "eval" ||
-      phase === "improve" ||
-      phase === "judge";
     const current = get().run;
-    if (current && current.id !== next.id) {
-      const history = [next, ...get().history.filter((item) => item.id !== next.id)].slice(
-        0,
-        HISTORY_LIMIT,
-      );
-      saveHistory(history);
-      set({ history });
-      return;
-    }
     if (
       current?.id === next.id &&
       current.generation === next.generation &&
-      current.evaluation?.score === next.evaluation?.score
+      current.evaluation?.score === next.evaluation?.score &&
+      (current.evaluation?.failed ?? []).join() === (next.evaluation?.failed ?? []).join()
     ) {
       return;
     }
@@ -842,11 +841,6 @@ export const useChorus = create<Store>((set, get) => ({
       0,
       HISTORY_LIMIT,
     );
-    if (busy) {
-      saveHistory(history);
-      set({ history });
-      return;
-    }
     persistFinished(next, history);
     set({
       run: next,
@@ -856,9 +850,10 @@ export const useChorus = create<Store>((set, get) => ({
       pasted: next.pastedArtifact ?? get().pasted,
       baseline: next.baseline ?? get().baseline,
       viewingN: next.generation ?? 1,
-      selectedId: "synthesizer",
+      selectedId: next.agents[0]?.id ?? "host",
     });
   },
+  bumpMcpSit: () => set({ mcpSitEpoch: get().mcpSitEpoch + 1 }),
   openFixtureSitting: (evaluation) => {
     const state = get();
     const id = loadMcpSit();
@@ -876,7 +871,7 @@ export const useChorus = create<Store>((set, get) => ({
       userTest: state.userTest.trim() || undefined,
       baseline: evaluation,
       evaluation,
-      agents: ghostAgents().map((agent) => ({ ...agent, status: "done" })),
+      agents: get().lane === "mcp" ? hostAgents() : ghostAgents().map((agent) => ({ ...agent, status: "done" })),
       slotSnapshot: { mode: "custom", model: "mcp-host", baseUrl: "mcp" },
     };
     const history = [run, ...state.history.filter((item) => item.id !== id)].slice(0, HISTORY_LIMIT);
@@ -886,7 +881,7 @@ export const useChorus = create<Store>((set, get) => ({
       history,
       baseline: evaluation,
       viewingN: 0,
-      selectedId: "synthesizer",
+      selectedId: get().lane === "mcp" ? "host" : "synthesizer",
     });
   },
   seedFrom: (source) => {

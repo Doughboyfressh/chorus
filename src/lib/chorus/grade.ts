@@ -18,9 +18,9 @@ export function examFor(labId?: string, level = 0, userTest?: string) {
     input: fixture.input,
     execute: fixture.execute,
     level,
-    findingsSchema: '{ "findings": [{ "issue": "one line", "quote": "exact source line" }] }',
+    findingsSchema: '{ "findings": [{ "issue": "one line", "quote": "exact line copied from input" }] }',
     note: fixture.execute
-      ? "Run this exam with the host model. Send the findings JSON back to score."
+      ? "Run exam.input under the artifact. Score with findings JSON. quote must be a verbatim line from input, not from your spec."
       : "Checklist only. Send the artifact to score.",
   };
 }
@@ -33,7 +33,9 @@ export function gradeArtifact(args: {
   userTest?: string;
   level?: number;
 }): EvalResult {
-  const level = Math.max(0, Math.min(6, Number(args.level) || 0));
+  const requested = Math.max(0, Number(args.level) || 0);
+  const max = maxFixtureLevel(args.labId);
+  const level = Math.min(requested, Math.max(max, 0));
   const fixture = applyUserTest(resolveFixture(args.labId, level), args.userTest);
   const artifact = `${args.title ?? ""}\n${args.deliverable}`;
   const structural = scoreChecks(artifact, fixture.checks);
@@ -73,6 +75,12 @@ export function gradeArtifact(args: {
 
   const platePassed = shouldRun && (plantedPassed.length + plantedFailed.length) > 0 ? plantedPassed : structural.passed;
   const plateFailed = shouldRun && (plantedPassed.length + plantedFailed.length) > 0 ? plantedFailed : structural.failed;
+  const plantsOpen = shouldRun && plantedFailed.length > 0;
+  const quoteHint = plantsOpen
+    ? "Findings need {issue, quote}. quote must copy a verbatim line from exam.input — not a line from your spec."
+    : shouldRun && !findings
+      ? "Host must run the exam, then chorus_score with findings that quote exam.input."
+      : undefined;
 
   return {
     labId: fixture.labId,
@@ -82,9 +90,7 @@ export function gradeArtifact(args: {
     failed: plateFailed,
     evidence,
     level,
-    exhausted:
-      level >= maxFixtureLevel(args.labId) &&
-      score >= 100 &&
-      plantedFailed.length + structural.failed.length === 0,
+    exhausted: level >= max && score >= 100 && plateFailed.length === 0,
+    quoteHint,
   };
 }

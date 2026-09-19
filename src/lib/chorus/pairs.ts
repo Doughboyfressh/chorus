@@ -10,6 +10,7 @@ export type PreferencePair = {
   model: string;
   labId: string;
   generation: number;
+  contaminated?: boolean;
 };
 
 export function preferencePairs(run: SwarmRun): PreferencePair[] {
@@ -31,6 +32,7 @@ export function preferencePairs(run: SwarmRun): PreferencePair[] {
         model,
         labId,
         generation: gens[0].n,
+        contaminated: Boolean(run.baseline?.contaminated || gens[0].evaluation?.contaminated),
       });
     }
   }
@@ -55,6 +57,7 @@ export function preferencePairs(run: SwarmRun): PreferencePair[] {
       model,
       labId,
       generation: cur.n,
+      contaminated: Boolean(cur.evaluation?.contaminated || prev.evaluation?.contaminated),
     });
   }
   return rows;
@@ -81,7 +84,7 @@ export function trainingPack(run: SwarmRun): TrainingPack {
     v: 1,
     model: run.slotSnapshot?.model ?? "unknown",
     labId: run.labId ?? "generic",
-    note: "Chorus does not train weights. Load dpo into your trainer. sft is chosen-only supervised fine-tune format.",
+    note: "Chorus does not train weights. Load dpo into your trainer. Drop rows where contaminated is true if the writer also ran the exam.",
     dpo,
     sft: dpo.map((row) => ({
       messages: [

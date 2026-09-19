@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { sittingPairs, sittingToRun, validSitId } from "@/lib/chorus/mcp-sitting";
+import { resetSitting, sittingFor, sittingPairs, sittingToRun, validSitId } from "@/lib/chorus/mcp-sitting";
 
 function sameOrigin(request: Request) {
   const site = request.headers.get("sec-fetch-site");
@@ -38,6 +38,34 @@ export const Route = createFileRoute("/api/sitting")({
           status: 200,
           headers: { "content-type": "application/json", "cache-control": "no-store" },
         });
+      },
+      POST: async ({ request }) => {
+        if (!sameOrigin(request)) {
+          return new Response(JSON.stringify({ error: "Forbidden" }), {
+            status: 403,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        const sit = new URL(request.url).searchParams.get("sit")?.trim() ?? "";
+        if (!validSitId(sit)) {
+          return new Response(JSON.stringify({ error: "Missing sit" }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        let labId = "";
+        try {
+          const body = (await request.json()) as { labId?: string; reset?: boolean };
+          if (typeof body.labId === "string" && body.labId.trim()) labId = body.labId.trim();
+        } catch {
+          /* empty body is a reset */
+        }
+        const existing = await sittingFor(sit);
+        const sitting = await resetSitting(sit, labId || existing.labId || "rsi");
+        return new Response(
+          JSON.stringify({ id: sitting.id, labId: sitting.labId, generations: 0, pairCount: 0 }),
+          { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } },
+        );
       },
     },
   },

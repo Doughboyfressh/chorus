@@ -48,6 +48,7 @@ export function SwarmStage() {
   const improver = agents.find((a) => a.role === "improver");
   const judge = agents.find((a) => a.role === "judge");
   const generation = run?.generation ?? 1;
+  const hostOnly = specialists.length === 0 && !critic && !synthesizer && !improver && !judge;
 
   return (
     <div className="rounded-3xl bg-surface p-5">
@@ -55,6 +56,23 @@ export function SwarmStage() {
         <span>Plate 01 — topology</span>
         <span>generation {generation}</span>
       </div>
+      {hostOnly ? (
+        <div className="flex flex-col items-center gap-3">
+          {conductor ? (
+            <div className="w-full max-w-sm">
+              <NodeCard
+                agent={conductor}
+                selected={selectedId === conductor.id}
+                onSelect={() => setSelected(conductor.id)}
+              />
+            </div>
+          ) : null}
+          <p className="max-w-sm text-center text-sm leading-relaxed text-muted">
+            Host sitting. The connected model is the swarm. Chorus grades. Same weights wrote
+            and sat the exam — pairs are marked contaminated.
+          </p>
+        </div>
+      ) : (
       <div className="flex flex-col items-center gap-2">
         {conductor ? (
           <div className="w-48">
@@ -115,6 +133,7 @@ export function SwarmStage() {
           </>
         ) : null}
       </div>
+      )}
     </div>
   );
 }

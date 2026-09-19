@@ -12,7 +12,7 @@ import {
   type Lane,
   type ModelSlot,
 } from "@/lib/chorus/slot";
-import { publicMcpUrl, rotateMcpSit } from "@/lib/chorus/mcp-url";
+import { adoptMcpSit, loadMcpSit, publicMcpUrl, sitFromText } from "@/lib/chorus/mcp-url";
 import { useChorus } from "@/lib/chorus/store";
 import { cn } from "@/lib/utils";
 
@@ -40,9 +40,12 @@ export function ModelSlotPanel() {
   const [sitRev, setSitRev] = useState(0);
   const [mcpUrl, setMcpUrl] = useState("/mcp");
   const [previewHost, setPreviewHost] = useState(false);
+  const [sitDraft, setSitDraft] = useState("");
+  const [wiping, setWiping] = useState(false);
+  const bumpMcpSit = useChorus((s) => s.bumpMcpSit);
   useEffect(() => {
     setMcpUrl(publicMcpUrl());
-    setPreviewHost(/grok-sandbox|grok\.me|localhost|127\.0\.0\.1/.test(window.location.hostname));
+    setPreviewHost(/grok-sandbox|grok\.me|localhost|127\.0\.0\.1/.test(window.location.host));
   }, [sitRev]);
   const local = isLoopbackUrl(draft.baseUrl);
   const selected = presetFor(draft);
@@ -117,8 +120,9 @@ export function ModelSlotPanel() {
             <li>Pick a lab. Paste the artifact you already use as gen 0.</li>
             <li>Score gen 0 here. A low number means the plants are still open. That is the start.</li>
             <li>Copy this URL into Grok → Connectors → Custom. Transport: Streamable HTTP. Auth: none.</li>
-            <li>Tell the host: run the Chorus sitting. Do not paste a key.</li>
-            <li>Watch this tab. Same sitting. When the score rises, export the pairs.</li>
+            <li>Tell the host: run the Chorus sitting. Score a weak gen 0 first.</li>
+            <li>This tab polls the same sitting. When the score rises, export the pairs.</li>
+            <li>New sitting wipes this URL in place. Grok stays connected.</li>
           </ol>
           {previewHost ? (
             <p className="mt-3 text-sm leading-relaxed text-warn">
@@ -128,6 +132,15 @@ export function ModelSlotPanel() {
             </p>
           ) : null}
           <p className="mt-3 break-all font-mono text-xs text-fg">{mcpUrl}</p>
+          <label className="mt-3 block">
+            <span className="sr-only">Paste Grok connector URL</span>
+            <input
+              className={field}
+              value={sitDraft}
+              onChange={(e) => setSitDraft(e.target.value)}
+              placeholder="Already connected? Paste that MCP URL"
+            />
+          </label>
           <div className="mt-3 flex flex-wrap gap-2">
           <Button
             variant="secondary"
@@ -145,13 +158,36 @@ export function ModelSlotPanel() {
           <Button
             variant="secondary"
             size="sm"
+            disabled={!sitFromText(sitDraft)}
             onClick={() => {
-              rotateMcpSit();
-              setCopied(false);
+              adoptMcpSit(sitDraft);
+              setSitDraft("");
               setSitRev((n) => n + 1);
+              bumpMcpSit();
             }}
           >
-            New sitting
+            Use this sitting
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={wiping}
+            onClick={() => {
+              const sit = loadMcpSit();
+              setWiping(true);
+              void fetch(`/api/sitting?sit=${encodeURIComponent(sit)}`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ reset: true }),
+              })
+                .then(() => {
+                  bumpMcpSit();
+                  setSitRev((n) => n + 1);
+                })
+                .finally(() => setWiping(false));
+            }}
+          >
+            {wiping ? "Wiping…" : "New sitting"}
           </Button>
           </div>
         </div>

@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LOOP_LINE } from "@/lib/chorus/lexicon";
-import { loadMcpSit } from "@/lib/chorus/mcp-url";
+import { adoptMcpSit, loadMcpSit, sitFromText } from "@/lib/chorus/mcp-url";
 import { loadSlot, loadLane } from "@/lib/chorus/slot";
 import { listSittings } from "@/lib/chorus/sittings";
 import { loadBaseline, loadHistory, loadSession, useChorus } from "@/lib/chorus/store";
@@ -24,6 +24,7 @@ export function ChorusApp() {
   const hydrateBaseline = useChorus((s) => s.hydrateBaseline);
   const restore = useChorus((s) => s.restore);
   const ingestMcpRun = useChorus((s) => s.ingestMcpRun);
+  const mcpSitEpoch = useChorus((s) => s.mcpSitEpoch);
   const mergeRemoteSittings = useChorus((s) => s.mergeRemoteSittings);
   const phase = useChorus((s) => s.run?.phase ?? "idle");
   const lane = useChorus((s) => s.lane);
@@ -59,6 +60,12 @@ export function ChorusApp() {
   }, [setHostedAvailable, setHistory, setSlot, setLane, restore, hydrateBaseline, mergeRemoteSittings]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const fromUrl = sitFromText(window.location.href);
+    if (fromUrl) adoptMcpSit(fromUrl);
+  }, []);
+
+  useEffect(() => {
     if (lane !== "mcp") return;
     const sit = loadMcpSit();
     let cancelled = false;
@@ -78,7 +85,7 @@ export function ChorusApp() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [lane, ingestMcpRun]);
+  }, [lane, ingestMcpRun, mcpSitEpoch]);
 
   return (
     <TooltipProvider delayDuration={200}>

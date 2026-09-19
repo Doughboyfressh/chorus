@@ -154,4 +154,16 @@ describe("gradeArtifact", () => {
     });
     assert.equal(graded.passed.includes("Caught reflected HTML/XSS"), true);
   });
+
+  it("hints to quote exam.input when plants miss", () => {
+    const graded = gradeArtifact({
+      labId: "rsi",
+      deliverable: "must fail threshold kill rewrite contract diversity stop",
+      findings: JSON.stringify({
+        findings: [{ issue: "looks fine", quote: "not a source line" }],
+      }),
+    });
+    assert.equal(graded.failed.length > 0, true);
+    assert.match(graded.quoteHint ?? "", /verbatim line from exam.input/);
+  });
 });

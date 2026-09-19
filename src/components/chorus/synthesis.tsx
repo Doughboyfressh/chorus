@@ -100,8 +100,14 @@ export function Synthesis() {
           {evaluation.executor ? (
             <p className="mt-1 text-sm text-muted">
               Executor: {evaluation.executor}
-              {evaluation.contaminated ? " · same weights as the writer" : " · held-out"}
+              {evaluation.contaminated ? " · same weights as the writer — pair is contaminated" : " · held-out"}
             </p>
+          ) : null}
+          {evaluation.quoteHint ? (
+            <p className="mt-2 text-sm leading-relaxed text-warn">{evaluation.quoteHint}</p>
+          ) : null}
+          {evaluation.exhausted ? (
+            <p className="mt-2 text-sm leading-relaxed text-ok">Fixture exhausted. Export the pairs.</p>
           ) : null}
           {evaluation.evidence ? (
             <p className="mt-2 text-sm leading-relaxed text-muted">{evaluation.evidence}</p>

@@ -113,6 +113,7 @@ export type EvalResult = {
   exhausted?: boolean;
   contaminated?: boolean;
   executor?: string;
+  quoteHint?: string;
 };
 
 export type Generation = {

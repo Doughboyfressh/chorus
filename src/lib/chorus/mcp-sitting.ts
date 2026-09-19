@@ -1,3 +1,4 @@
+import { validSitId } from "./mcp-url.ts";
 import type { PreferencePair } from "./pairs.ts";
 import type { Agent, EvalResult, Generation, SwarmRun } from "./types.ts";
 
@@ -17,9 +18,7 @@ const MAX_PAYLOAD = 400_000;
 const MAX_ARTIFACT = 24_000;
 const bySession = new Map<string, McpSitting>();
 
-export function validSitId(id: string) {
-  return /^[a-zA-Z0-9_-]{8,80}$/.test(id);
-}
+export { validSitId };
 
 async function sqlClient() {
   if (typeof process !== "undefined" && process.env.NODE_TEST_CONTEXT) return null;
@@ -154,6 +153,7 @@ export async function recordScore(sessionId: string, artifact: string, graded: E
       model: "mcp-host",
       labId: sitting.labId,
       generation: sitting.scores.length,
+      contaminated: true,
     };
     sitting.pairs.push(pair);
   }
@@ -182,7 +182,28 @@ function asEval(
 
 export async function sittingToRun(sessionId: string): Promise<SwarmRun | null> {
   const sitting = bySession.get(sessionId) ?? (await loadFromDb(sessionId));
-  if (!sitting || sitting.scores.length === 0) return null;
+  if (!sitting) return null;
+  const host: Agent = {
+    id: "host",
+    role: "conductor",
+    name: "MCP host",
+    mandate: "Host writes. Chorus grades.",
+    status: sitting.scores.length ? "done" : "pending",
+    headline: "MCP host",
+  };
+  if (sitting.scores.length === 0) {
+    return {
+      id: sitting.id,
+      goal: sitting.labId,
+      labId: sitting.labId,
+      startedAt: Date.now(),
+      phase: "idle",
+      generation: 0,
+      generations: [],
+      agents: [host],
+      slotSnapshot: { mode: "custom", model: "mcp-host", baseUrl: "mcp" },
+    };
+  }
   const first = sitting.scores[0]!;
   const last = sitting.scores.at(-1)!;
   const generations: Generation[] = sitting.scores.map((row, i) => ({
@@ -203,9 +224,9 @@ export async function sittingToRun(sessionId: string): Promise<SwarmRun | null> 
     id,
     role,
     name,
-    mandate: "MCP host",
+    mandate: "Host writes. Chorus grades.",
     status: "done",
-    headline: "Host sitting",
+    headline: "MCP host",
   });
   return {
     id: sitting.id,
@@ -216,16 +237,7 @@ export async function sittingToRun(sessionId: string): Promise<SwarmRun | null> 
     phase: "done",
     generation: sitting.scores.length,
     generations,
-    agents: [
-      done("conductor", "conductor", "Conductor"),
-      done("s1", "specialist", "Specialist 1"),
-      done("s2", "specialist", "Specialist 2"),
-      done("s3", "specialist", "Specialist 3"),
-      done("critic", "critic", "Critic"),
-      done("synthesizer", "synthesizer", "Synthesizer"),
-      done("improver", "improver", "Improver"),
-      done("judge", "judge", "Judge"),
-    ],
+    agents: [done("host", "conductor", "MCP host")],
     synthesis: generations.at(-1)?.synthesis,
     evaluation: asEval(last, sitting.labId, sitting.level),
     fixtureLevel: sitting.level,

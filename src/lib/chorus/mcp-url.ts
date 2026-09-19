@@ -10,17 +10,42 @@ function newSit() {
   return [...bytes].map((n) => n.toString(16).padStart(2, "0")).join("");
 }
 
+export function validSitId(id: string) {
+  return /^[a-zA-Z0-9_-]{8,80}$/.test(id);
+}
+
+export function sitFromText(raw: string) {
+  const t = raw.trim();
+  const path = t.match(/\/mcp\/([a-zA-Z0-9_-]{8,80})/);
+  if (path?.[1] && validSitId(path[1])) return path[1];
+  const query = t.match(/[?&]sit=([a-zA-Z0-9_-]{8,80})/);
+  if (query?.[1] && validSitId(query[1])) return query[1];
+  if (validSitId(t)) return t;
+  return "";
+}
+
 export function loadMcpSit(): string {
   if (typeof sessionStorage === "undefined") return newSit();
   try {
     const existing = sessionStorage.getItem(SIT_KEY);
-    if (existing) return existing;
+    if (existing && validSitId(existing)) return existing;
     const id = newSit();
     sessionStorage.setItem(SIT_KEY, id);
     return id;
   } catch {
     return newSit();
   }
+}
+
+export function adoptMcpSit(id: string) {
+  const sit = sitFromText(id);
+  if (!sit) return loadMcpSit();
+  try {
+    sessionStorage.setItem(SIT_KEY, sit);
+  } catch {
+    /* private mode */
+  }
+  return sit;
 }
 
 export function rotateMcpSit() {

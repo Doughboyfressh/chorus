@@ -35,13 +35,11 @@ function textResult(payload: unknown, isError = false) {
 
 const SITTING_PROMPT = `You are running a Chorus sitting. You (the host model) are the swarm. Chorus grades and keeps the pairs.
 
-1. chorus_labs — pick a lab (default: prompt).
-2. If the user pasted an artifact, chorus_score it as gen 0. If the lab executes, chorus_exam first, run that exam yourself, then chorus_score with findings.
-3. Write a contract and staff 3 non-overlapping specialists. Each specialist returns a PATCH of the artifact, not a comment.
-4. Merge into one deliverable.
-5. chorus_exam + run it yourself + chorus_score. A rising score writes a preference pair.
-6. Recurse on fixture failures only. Stop at 8 generations or when the fixture is exhausted. Then chorus_new_sitting — same URL, empty ledger.
-7. chorus_pairs when a later score beats an earlier one.
+1. chorus_labs — pick ONE lab. Stay on it.
+2. chorus_score the user's paste as gen 0. Weak is correct. If the lab executes, chorus_exam first, run that input under the artifact, then chorus_score with findings JSON {findings:[{issue, quote}]}. quote must be a verbatim line from exam.input, not from your spec.
+3. Recurse only on failed plants. A later score beating an earlier one writes a pair.
+4. Stop when exhausted is true, or at 8 generations. Then chorus_pairs.
+5. If generation is 8 or you need a clean ledger, chorus_new_sitting or chorus_score with reset:true. Same MCP URL.
 
 Do not ask the user for an API key. You are the model.`;
 
@@ -124,7 +122,7 @@ export async function handleMcp(body: unknown, ctx: McpCtx): Promise<unknown | n
       await sittingFor(ctx.sessionId);
       return ok(msg.id, {
         protocolVersion: protocol,
-        capabilities: { tools: { listChanged: false }, prompts: {}, resources: {} },
+        capabilities: { tools: { listChanged: true }, prompts: {}, resources: {} },
         serverInfo: { name: "chorus", version: "1.0.0" },
         instructions: SITTING_PROMPT,
       });
@@ -184,6 +182,7 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
       level: Number(args.level) || 0,
     });
     const recorded = await recordScore(sessionId, artifact, graded, args.goal ? String(args.goal) : "");
+    const exhausted = Boolean(graded.exhausted);
     return textResult({
       ...graded,
       sittingId: recorded.sitting.id,
@@ -191,9 +190,13 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
       pairCount: recorded.sitting.pairs.length,
       generation: recorded.sitting.scores.length,
       capped: recorded.capped ?? false,
+      exhausted,
+      nextLevel: exhausted ? null : graded.level + 1,
       hint: recorded.capped
-        ? "Generation cap 8. Call chorus_new_sitting (same URL) or chorus_score with reset:true."
-        : undefined,
+        ? "Generation cap 8. chorus_new_sitting or chorus_score with reset:true. Same URL."
+        : exhausted
+          ? "Fixture exhausted. chorus_pairs for the JSONL. chorus_new_sitting to start another lab."
+          : graded.quoteHint,
     });
   }
   if (name === "chorus_new_sitting") {
