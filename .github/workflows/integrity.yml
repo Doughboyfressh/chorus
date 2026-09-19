@@ -1,21 +1,18 @@
 name: Evaluation integrity
-
 on:
   push:
   pull_request:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
   group: integrity-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
-  verify:
+  integrity:
+    name: Integrity, SQL, build and types
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,14 +21,37 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - name: Archive tracked source for reproducibility
-        run: git archive --format=tar HEAD > source.tar
-      - uses: actions/upload-artifact@v4
-        with:
-          name: integrity-source-${{ github.sha }}
-          path: source.tar
-          retention-days: 3
-      - run: npm ci --ignore-scripts
-      - run: npm test
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Core regressions
+        run: node --experimental-strip-types --test src/lib/chorus/*.test.ts
+      - name: Atomic PostgreSQL attempt and history tests
+        run: npm run test:integrity:db
+      - name: Build and generate router types
+        run: npm run build:dev
       - run: npm run typecheck
-      - run: npm run build:dev
+      - name: Application data and authentication tests
+        run: node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts
+  legacy-template-suite:
+    name: Full template suite (existing failures remain visible)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run the unchanged full test command
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee full-suite.log
+      - name: Preserve complete failures rather than marking them passed
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-suite-${{ github.run_id }}
+          path: full-suite.log
+          retention-days: 7
