@@ -1,5 +1,6 @@
 import { extractJson } from "./parse.ts";
 import { gradeArtifact } from "./grade.ts";
+import { labBrief, resolveGoal } from "./labs.ts";
 import type { Agent } from "./types.ts";
 
 export type SeatId =
@@ -13,6 +14,7 @@ export type SeatId =
   | "judge";
 
 export type Orchestra = {
+  labId?: string;
   goal: string;
   pasted?: string;
   mode: "gen1" | "recurse";
@@ -31,12 +33,15 @@ function clip(text: string, n: number) {
 }
 
 export function startOrchestraState(args: {
-  goal: string;
+  labId?: string;
+  goal?: string;
   pasted?: string;
   recurse?: boolean;
 }): Orchestra {
+  const labId = args.labId || "rsi";
   return {
-    goal: clip(args.goal || "Improve the pasted artifact.", 800),
+    labId,
+    goal: resolveGoal(labId, args.goal),
     pasted: args.pasted ? clip(args.pasted, 8000) : undefined,
     mode: args.recurse ? "recurse" : "gen1",
     filled: {},
@@ -123,13 +128,15 @@ export function pendingSeat(orch: Orchestra): SeatId | null {
 }
 
 export function seatPrompt(orch: Orchestra, seat: SeatId) {
+  const labCtx = labBrief(orch.labId);
   const goal = orch.goal;
+  const stay = `Stay on this lab. ${labCtx}`;
   const pasted = orch.pasted?.trim()
     ? `\nRewrite THIS artifact. Do not start a new essay.\n---\n${orch.pasted.slice(0, 1800)}\n---`
     : "";
   const staff = staffOf(orch);
   const contract = contractOf(orch) || "Deliver a testable artifact.";
-  const brief = staff[["s1", "s2", "s3"].indexOf(seat)];
+  const seatBrief = staff[["s1", "s2", "s3"].indexOf(seat)];
   const patches = (["s1", "s2", "s3"] as const)
     .map((id) => {
       const row = staff[["s1", "s2", "s3"].indexOf(id)];
@@ -147,23 +154,27 @@ export function seatPrompt(orch: Orchestra, seat: SeatId) {
       role: "Conductor",
       user: `You are the Conductor. Write a tight contract, then staff 3 specialists with zero overlapping mandates.
 
-Goal:
+${stay}
+
+User goal (if it conflicts with the lab, the lab wins):
 ${goal}
 ${pasted}
 
 Return JSON:
 {"contract":"what done looks like","whyThisSplit":"one sentence","specialists":[{"id":"s1","name":"Two Word Role","mandate":"one sentence unique job","lens":"what they uniquely notice"}]}
 
-Exactly 3 specialists. Names are roles, not cute.`,
+Exactly 3 specialists. Names are roles, not cute. Do not staff a trading desk, a tutor, or any other product than this lab.`,
     };
   }
-  if (brief && (seat === "s1" || seat === "s2" || seat === "s3")) {
+  if (seatBrief && (seat === "s1" || seat === "s2" || seat === "s3")) {
     return {
       seat,
-      role: brief.name,
-      user: `You are ${brief.name}.
-Mandate: ${brief.mandate}
-Lens: ${brief.lens}
+      role: seatBrief.name,
+      user: `You are ${seatBrief.name}.
+Mandate: ${seatBrief.mandate}
+Lens: ${seatBrief.lens}
+
+${stay}
 
 Contract:
 ${contract}
@@ -181,6 +192,8 @@ Do the work from your lens only. Return JSON:
       seat,
       role: "Critic",
       user: `You are the Critic. Find holes, overlap, and confident-wrong claims.
+
+${stay}
 
 Contract:
 ${contract}
@@ -200,6 +213,8 @@ Return JSON:
       seat,
       role: "Synthesizer",
       user: `You are the Synthesizer. Merge surviving work into one deliverable.
+
+${stay}
 
 Goal:
 ${goal}
@@ -223,6 +238,8 @@ Return JSON:
       seat,
       role: "Improver",
       user: `You are the Improver. Open holes are the next contract. Rewrite so the next staff closes them.
+
+${stay}
 
 Goal:
 ${goal}

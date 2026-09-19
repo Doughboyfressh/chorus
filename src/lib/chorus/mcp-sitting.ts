@@ -379,7 +379,8 @@ export async function applySittingUpdate(
   if (args.merge?.trim()) sitting.merge = args.merge.trim().slice(0, 24_000);
   if (args.conduct) {
     sitting.orchestra = startOrchestraState({
-      goal: args.goal || sitting.labId,
+      labId: sitting.labId,
+      goal: args.goal,
       pasted: args.pasted || sitting.current || sitting.artifact0,
       recurse: sitting.scores.length > 0,
     });

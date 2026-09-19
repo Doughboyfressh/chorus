@@ -261,6 +261,28 @@ describe("handleMcp", () => {
     assert.equal(s1.seat, "s1");
   });
 
+  it("does not treat rsi as a trading ticker", async () => {
+    await dropSession("rsi-trap");
+    const sid = { sessionId: "rsi-trap", protocol: "2025-03-26" };
+    await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 30,
+        method: "tools/call",
+        params: { name: "chorus_sitting", arguments: { conduct: true, labId: "rsi" } },
+      },
+      sid,
+    );
+    const next = (await handleMcp(
+      { jsonrpc: "2.0", id: 31, method: "tools/call", params: { name: "chorus_next", arguments: {} } },
+      sid,
+    )) as { result: { content: { text: string }[] } };
+    const seat = JSON.parse(next.result.content[0]!.text) as { user: string };
+    assert.match(seat.user, /Not Relative Strength/);
+    assert.match(seat.user, /coding agent/);
+    assert.doesNotMatch(seat.user, /^rsi$/m);
+  });
+
   it("initialize is idempotent", async () => {
     await dropSession("bound-session");
     const host = { sessionId: "bound-session", protocol: "2025-03-26" };
