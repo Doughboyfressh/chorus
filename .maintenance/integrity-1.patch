@@ -1,0 +1,391 @@
+diff --git a/SECURITY.md b/SECURITY.md
+new file mode 100644
+index 0000000..61f5d31
+--- /dev/null
++++ b/SECURITY.md
+@@ -0,0 +1,101 @@
++# Evaluation integrity
++
++## What scores mean
++
++Chorus currently runs **public practice exercises**. A diagnostic score describes
++matches against that public exercise, not independently verified execution,
++semantic correctness, generalization, or recursive self-improvement. The same
++model can see the exercise and supply its output. Changing roles or executor
++names does not establish independence. User-selected API endpoints are not a
++trusted evaluator either.
++
++Every current result and review candidate is unverified and contaminated.
++**Clean DPO/SFT exports are disabled.** There is deliberately no configuration
++flag, model name, imported JSON field, or user-supplied receipt that unlocks them.
++Old ledger entries retain their content for review but cannot become clean
++training rows. Raw candidate exports are explicitly labeled for human review.
++A changed artifact plus a higher public-practice score is not a verified
++improvement claim. A cosmetic-duplicate filter is not a semantic-equivalence
++proof.
++
++This closes the known paths from untrusted practice output into claimed verified
++results. It does not turn a lexical exercise into a semantic evaluator, prevent
++all possible reward hacking, or certify historical runs. An adversary may still
++optimize public diagnostic matches; these remain unverified and non-trainable.
++
++## Enforced boundaries
++
++- Findings must be a complete JSON object with an array of bounded `{issue,quote}`
++  objects. A malformed row invalidates the submission. There is no raw-text
++  fallback or string-row shortcut. Evidence is matched within one finding; the
++  quote must be an exact, single source line and cannot supply the issue keyword.
++  Conservative security-negation checks block the reproduced deny-all attack.
++- Arbitrary custom-test output earns no credit for the custom test. Additional
++  ungraded tests cannot produce a full-credit result. Unknown labs and out-of-range
++  or fractional levels are rejected instead of silently falling back or clamping.
++- `chorus_exam` requires the exact artifact before returning the exercise. Its
++  attempt ID binds session, artifact, lab, level and complete custom test; it
++  expires after ten minutes and is atomically consumed once in the database.
++  `chorus_score` must present the unchanged inputs and ID. Fetching an exam does
++  **not** prove the host actually executed it.
++- The orchestra's exam seat uses the same binding and one-use check. Obtain its
++  attempt ID from `chorus_next`, and include it in `chorus_fill`.
++- A sitting with recorded results pins its lab and current level. Changing labs
++  requires explicit reset. Reset invalidates outstanding attempts. Consumed
++  attempts are stored separately from the sitting so stale snapshots cannot
++  resurrect them. Optimistic database revision checks reject stale history writes.
++- Diagnostic candidates require identical complete test identity, level, lab and
++  execution configuration; finite bounded scores; a positive diagnostic delta;
++  different normalized artifact text; and no newly failing checks. They remain
++  unverified regardless of both sides' serialized metadata.
++- The API executor receives the full bounded artifact, not its first 2,400
++  characters. Oversize artifacts are rejected before model execution. HTTP body
++  limits count actual bytes rather than trusting Content-Length. Browser mutation
++  requests enforce same-origin restrictions. Malformed JSON never implies reset.
++
++## Deployment and migration
++
++Migration `0004_exam_attempts.sql` adds the attempt table and sitting revision
++column without deleting existing ledgers. The existing migration runner discovers
++it. On Vercel or in production, `DATABASE_URL` must point to durable PostgreSQL.
++Missing durable storage fails closed; development's process-local PGlite cannot
++serve as a production replay ledger. Database outages and conflicts are surfaced,
++not silently acknowledged as successful writes.
++
++Sitting URLs use cryptographic UUIDs and are **bearer capabilities**: anyone who
++has one may operate that sitting. Keep them private. This is not a user-account
++access-control system. Rotate a disclosed URL. Same-origin checks are browser
++CSRF protection, not a substitute for possession-based or account authentication.
++Server operators, database administrators, and repository maintainers remain
++trusted and can change code or records; this patch does not claim to defend
++against a compromised server administrator.
++
++## Verification
++
++Run `npm ci --ignore-scripts`, then `npm test`, `npm run typecheck`, and
++`npm run build:dev`. The test command includes new scoring/transport/provenance
++regressions and `tests/chorus-storage.test.ts`, which executes production SQL and
++migrations on PGlite PostgreSQL. The storage tests check atomic consumption,
++context binding, expiration, reset invalidation, optimistic revisions and
++non-resurrection across independent adapter instances. Dependency-free core
++checks can also be run with:
++
++```sh
++node --experimental-strip-types --test src/lib/chorus/*.test.ts
++```
++
++These are automated regression tests, not a production penetration test or proof
++that a generative system can never cheat.
++
++## Requirements before unlocking verified training
++
++Implement a separate server-controlled, authenticated evaluator with private,
++rotating holdouts inaccessible to the writing agent; freeze and hash both
++candidates before evaluation; execute both under matched, server-owned settings;
++retain immutable request/output receipts with single-use evaluation identities;
++validate task correctness independently of keyword matching; assess paired
++performance and regressions across sufficient independent cases; and authorize
++exports against server records rather than client JSON. Preserve both candidates'
++provenance. Public development feedback must never double as private validation.
++Do not unlock exports merely because a model calls itself independent or provides
++a plausible-looking signature.
+diff --git a/migrations/0004_exam_attempts.sql b/migrations/0004_exam_attempts.sql
+new file mode 100644
+index 0000000..ef9cba0
+--- /dev/null
++++ b/migrations/0004_exam_attempts.sql
+@@ -0,0 +1,11 @@
++create table if not exists chorus_exam_attempts (
++  id text primary key,
++  sitting_id text not null,
++  context_key text not null,
++  expires_at timestamptz not null,
++  consumed boolean not null default false
++);
++create index if not exists chorus_exam_attempts_sitting on chorus_exam_attempts(sitting_id);
++create index if not exists chorus_exam_attempts_expiry on chorus_exam_attempts(expires_at);
++
++alter table chorus_mcp_sittings add column if not exists revision bigint not null default 0;
+diff --git a/package.json b/package.json
+index c1b7cde..3de30ad 100644
+--- a/package.json
++++ b/package.json
+@@ -19 +19 @@
+-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/chorus/fixtures.test.ts src/lib/chorus/pairs.test.ts src/lib/chorus/slot.test.ts src/lib/chorus/ledger.test.ts src/lib/chorus/mcp.test.ts",
++    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/chorus/*.test.ts && npm run test:integrity:db",
+@@ -21 +21,2 @@
+-    "format": "prettier --write ."
++    "format": "prettier --write .",
++    "test:integrity:db": "node --experimental-strip-types --test tests/chorus-storage.test.ts"
+diff --git a/src/components/chorus/compare-plate.tsx b/src/components/chorus/compare-plate.tsx
+index 07da379..b4d05f8 100644
+--- a/src/components/chorus/compare-plate.tsx
++++ b/src/components/chorus/compare-plate.tsx
+@@ -0,0 +1,2 @@
++import { comparableDiagnostics } from "@/lib/chorus/integrity";
++import { judgeFromFixture } from "@/lib/chorus/ledger";
+@@ -32 +34 @@ function GenColumn({ gen }: { gen: Generation }) {
+-          Fixture {gen.evaluation.score}/100
++          Practice {gen.evaluation.score}/100 · unverified
+@@ -65 +67 @@ export function ComparePlate() {
+-  const judge = right.judge ?? run.judge;
++  const judge = right.evaluation ? judgeFromFixture(left.evaluation, right.evaluation) : undefined;
+@@ -69 +71 @@ export function ComparePlate() {
+-    typeof leftScore === "number" && typeof rightScore === "number" ? rightScore - leftScore : null;
++    comparableDiagnostics(left.evaluation, right.evaluation) && typeof leftScore === "number" && typeof rightScore === "number" ? rightScore - leftScore : null;
+@@ -75 +77 @@ export function ComparePlate() {
+-          <p className="font-mono text-xs uppercase tracking-widest text-subtle">Fixture delta</p>
++          <p className="font-mono text-xs uppercase tracking-widest text-subtle">Practice comparison · unverified</p>
+@@ -85 +87 @@ export function ComparePlate() {
+-            {right.evaluation?.fixture ?? "Held-out test"}
++            {right.evaluation?.fixture ?? "Public practice test"}
+@@ -96 +98 @@ export function ComparePlate() {
+-            {judge.verdict}
++            {"unverified"}
+diff --git a/src/components/chorus/composer.tsx b/src/components/chorus/composer.tsx
+index 5657fea..4ba8bb4 100644
+--- a/src/components/chorus/composer.tsx
++++ b/src/components/chorus/composer.tsx
+@@ -124 +124 @@ export function Composer() {
+-            placeholder="Optional: your held-out test. Stacks on the lab fixture."
++            placeholder="Optional: an additional ungraded test. Stacks on the lab fixture."
+@@ -129 +129 @@ export function Composer() {
+-              Gen 0 scored {baseline.score}/100
++              Gen 0 practice {baseline.score}/100 · unverified
+diff --git a/src/components/chorus/history-list.tsx b/src/components/chorus/history-list.tsx
+index 487416f..7433512 100644
+--- a/src/components/chorus/history-list.tsx
++++ b/src/components/chorus/history-list.tsx
+@@ -31 +31 @@ function sittingLabel(run: SwarmRun) {
+-  const verdict = target.verdict === "none" ? "unjudged" : target.verdict;
++  const verdict = "independent improvement unverified";
+@@ -36 +36 @@ function sittingLabel(run: SwarmRun) {
+-    typeof score === "number" ? `${score}/100` : null,
++    typeof score === "number" ? `${score}/100 · unverified` : null,
+diff --git a/src/components/chorus/landing.tsx b/src/components/chorus/landing.tsx
+index 870f587..10592e0 100644
+--- a/src/components/chorus/landing.tsx
++++ b/src/components/chorus/landing.tsx
+@@ -18,2 +18,2 @@ const USES = [
+-    title: "Pairs for your weights",
+-    body: "Chosen only when the number rose. JSONL you can train on. The model in the slot is tagged.",
++    title: "Candidates for human review",
++    body: "Comparable practice improvements can be exported for review, not training. Verified training export is locked.",
+@@ -24 +24 @@ const STEPS = [
+-  { n: "01", title: "Paste", body: "The artifact you already use. Optional: your held-out test." },
++  { n: "01", title: "Paste", body: "The artifact you already use. Optional: your additional practice test." },
+@@ -28 +28 @@ const STEPS = [
+-  { n: "05", title: "Export", body: "Pairs when the score rises. Playbook of the sitting. Stop when the ladder is exhausted." },
++  { n: "05", title: "Export", body: "Unverified review candidates and a playbook. Practice scores do not certify improvement." },
+@@ -43,2 +43,2 @@ export function Landing() {
+-            by a held-out fixture, is. Plug in Grok, Claude, GPT, Gemini, or a model on this
+-            machine. The test does not care which.
++            by public practice fixtures, is a starting point—not proof of improvement. Plug in Grok, Claude, GPT, Gemini, or a model on this
++            machine. Independent validation is still required.
+diff --git a/src/components/chorus/model-slot.tsx b/src/components/chorus/model-slot.tsx
+index fc2ffbe..31671da 100644
+--- a/src/components/chorus/model-slot.tsx
++++ b/src/components/chorus/model-slot.tsx
+@@ -184 +184,2 @@ export function ModelSlotPanel() {
+-                .then(() => {
++                .then((response) => {
++                  if (!response.ok) throw new Error("Sitting reset was rejected; history was not confirmed cleared.");
+@@ -187,0 +189 @@ export function ModelSlotPanel() {
++                .catch((err) => window.alert(err instanceof Error ? err.message : "Sitting reset failed."))
+@@ -304 +306 @@ function ExecutorPicker({
+-      <p className="font-mono text-xs uppercase tracking-widest text-subtle">Held-out executor</p>
++      <p className="font-mono text-xs uppercase tracking-widest text-subtle">Practice executor</p>
+@@ -333,3 +335 @@ function ExecutorPicker({
+-        {resolved.contaminated
+-          ? `The fixture will run on ${resolved.label} — the same weights that write.`
+-          : `The fixture runs on ${resolved.label}, not the writer.`}
++        {`Practice runs on ${resolved.label}. Selecting a different model does not establish independence or unlock training export.`}
+diff --git a/src/components/chorus/synthesis.tsx b/src/components/chorus/synthesis.tsx
+index 499c1f9..6c06c69 100644
+--- a/src/components/chorus/synthesis.tsx
++++ b/src/components/chorus/synthesis.tsx
+@@ -90,0 +91,4 @@ export function Synthesis() {
++      <p role="status" className="mb-4 rounded-xl bg-surface-2 p-4 text-sm text-warn">
++        Practice mode: public fixtures are diagnostic, not independent validation.
++        All results, including legacy runs, are unverified. Clean training export is locked.
++      </p>
+@@ -95 +99 @@ export function Synthesis() {
+-            Fixture v{(evaluation.level ?? 0) + 1}
++            Public practice v{(evaluation.level ?? 0) + 1}
+@@ -98 +102 @@ export function Synthesis() {
+-          <p className="mt-2 font-display text-2xl leading-tight text-fg">{evaluation.score}/100</p>
++          <p className="mt-2 font-display text-2xl leading-tight text-fg">{evaluation.score}/100 · unverified</p>
+@@ -103 +107 @@ export function Synthesis() {
+-              {evaluation.contaminated ? " · same weights as the writer — pair is contaminated" : " · held-out"}
++              {" · claimed executor; independence is not verified"}
+@@ -110 +114 @@ export function Synthesis() {
+-            <p className="mt-2 text-sm leading-relaxed text-ok">Fixture exhausted. Export the pairs.</p>
++            <p className="mt-2 text-sm leading-relaxed text-ok">Public practice ladder completed. Independent validation is still required.</p>
+@@ -135 +139 @@ export function Synthesis() {
+-        <p className="mb-6 font-display text-lg text-muted">Scoring the held-out fixture.</p>
++        <p className="mb-6 font-display text-lg text-muted">Running the public practice fixture.</p>
+@@ -179 +183 @@ export function Synthesis() {
+-                Pairs
++                Review candidates
+@@ -181,2 +185,2 @@ export function Synthesis() {
+-              <Button variant="secondary" size="sm" onClick={() => downloadTraining()} disabled={!hasPairs}>
+-                Train
++              <Button variant="secondary" size="sm" onClick={() => downloadTraining()} disabled title="Requires independently verified private-holdout comparison">
++                Training locked
+diff --git a/src/lib/chorus/api.ts b/src/lib/chorus/api.ts
+index 50a6e22..0fc3c78 100644
+--- a/src/lib/chorus/api.ts
++++ b/src/lib/chorus/api.ts
+@@ -0,0 +1 @@
++import { boundedText } from "./integrity.ts";
+@@ -18 +19 @@ export const proxyChat = createServerFn({ method: "POST" })
+-    user: String(input.user ?? "").slice(0, 12_000),
++    user: boundedText(input.user, "user", 20_000, 1),
+@@ -22 +23 @@ export const proxyChat = createServerFn({ method: "POST" })
+-    system: input.system ? String(input.system).slice(0, 4_000) : undefined,
++    system: input.system === undefined ? undefined : boundedText(input.system, "system", 30_000),
+diff --git a/src/lib/chorus/attempts.ts b/src/lib/chorus/attempts.ts
+new file mode 100644
+index 0000000..378300e
+--- /dev/null
++++ b/src/lib/chorus/attempts.ts
+@@ -0,0 +1,73 @@
++import { requireDurableDatabase } from "./durable-storage.ts";
++import { boundedText, MAX_ARTIFACT, MAX_USER_TEST } from "./integrity.ts";
++import type { Sql } from "../db.ts";
++
++export type ExamBinding = { labId: string; level: number; artifact: string; userTest?: string };
++export const EXAM_TTL_MS = 10 * 60_000;
++const memory = new Map<string, { sitting: string; key: string; expiresAt: number; consumed: boolean }>();
++const contextKey = (b: ExamBinding) => {
++  boundedText(b.artifact, "artifact", MAX_ARTIFACT, 8);
++  boundedText(b.userTest ?? "", "userTest", MAX_USER_TEST);
++  return JSON.stringify([2, b.labId, b.level, b.artifact, b.userTest ?? ""]);
++};
++
++export function databaseAttempts(sql: Sql) {
++  return {
++    async issue(sitting: string, binding: ExamBinding) {
++      const attemptId = crypto.randomUUID();
++      const expiresAt = Date.now() + EXAM_TTL_MS;
++      const key = contextKey(binding);
++      await sql`insert into chorus_exam_attempts (id, sitting_id, context_key, expires_at)
++        values (${attemptId}, ${sitting}, ${key}, ${new Date(expiresAt).toISOString()})`;
++      // Only expire by time: resetting the score ledger must never resurrect a used nonce.
++      await sql`delete from chorus_exam_attempts where expires_at < now() - interval '1 day'`;
++      return { attemptId, expiresAt };
++    },
++    async consume(sitting: string, attemptId: string, binding: ExamBinding) {
++      const key = contextKey(binding);
++      const rows = await sql<{ id: string }>`update chorus_exam_attempts set consumed = true
++        where id = ${attemptId} and sitting_id = ${sitting} and context_key = ${key}
++        and consumed = false and expires_at > now() returning id`;
++      return rows.length === 1;
++    },
++    async invalidate(sitting: string) {
++      await sql`update chorus_exam_attempts set consumed = true where sitting_id = ${sitting}`;
++    },
++  };
++}
++
++async function store() {
++  if (typeof process !== "undefined" && process.env.NODE_TEST_CONTEXT) {
++    return {
++      async issue(sitting: string, binding: ExamBinding) {
++        for (const [id, row] of memory) if (row.expiresAt <= Date.now()) memory.delete(id);
++        if (memory.size >= 1000) throw new Error("Too many outstanding test attempts.");
++        const attemptId = crypto.randomUUID();
++        const expiresAt = Date.now() + EXAM_TTL_MS;
++        memory.set(attemptId, { sitting, key: contextKey(binding), expiresAt, consumed: false });
++        return { attemptId, expiresAt };
++      },
++      async consume(sitting: string, attemptId: string, binding: ExamBinding) {
++        const row = memory.get(attemptId);
++        if (!row || row.consumed || row.expiresAt <= Date.now() || row.sitting !== sitting || row.key !== contextKey(binding)) return false;
++        row.consumed = true; // Before any await: concurrent submissions get exactly one success.
++        return true;
++      },
++      async invalidate(sitting: string) {
++        for (const row of memory.values()) if (row.sitting === sitting) row.consumed = true;
++      },
++    };
++  }
++  // Production never silently falls back to process-local, replayable storage.
++  requireDurableDatabase(process.env);
++  const { getSql } = await import("../db.ts");
++  return databaseAttempts(await getSql());
++}
++
++export async function issueAttempt(sitting: string, binding: ExamBinding) {
++  return (await store()).issue(sitting, binding);
++}
++export async function consumeAttempt(sitting: string, attemptId: string, binding: ExamBinding) {
++  return (await store()).consume(sitting, attemptId, binding);
++}
++export async function invalidateAttempts(sitting: string) { await (await store()).invalidate(sitting); }
+diff --git a/src/lib/chorus/durable-storage.ts b/src/lib/chorus/durable-storage.ts
+new file mode 100644
+index 0000000..993aa90
+--- /dev/null
++++ b/src/lib/chorus/durable-storage.ts
+@@ -0,0 +1,6 @@
++/** Process-local PGLite is development-only, not a deployment replay ledger. */
++export function requireDurableDatabase(env: Record<string, string | undefined>) {
++  if ((env.VERCEL === "1" || env.NODE_ENV === "production") && !env.DATABASE_URL?.trim()) {
++    throw new Error("A durable DATABASE_URL is required for deployed exam attempts and sitting history.");
++  }
++}
+diff --git a/src/lib/chorus/engine.ts b/src/lib/chorus/engine.ts
+index f6e92b3..36468a0 100644
+--- a/src/lib/chorus/engine.ts
++++ b/src/lib/chorus/engine.ts
+@@ -0,0 +1 @@
++import { boundedText, MAX_ARTIFACT, MAX_USER_TEST } from "./integrity.ts";
+@@ -2,3 +3,2 @@ import type { ChatFn } from "./completions";
+-import { examFor, gradeArtifact } from "./grade";
+-import { maxFixtureLevel } from "./fixtures";
+-import { asString, asStringList, extractJson } from "./parse";
++import { examFor, gradeArtifact } from "./grade.ts";
++import { asString, asStringList, extractJson } from "./parse.ts";
+@@ -18 +18 @@ import type {
+-} from "./types";
++} from "./types.ts";
+@@ -179 +179 @@ export async function critiqueSwarm(
+-The fixture is the ground truth. If the fixture still fails, those failures ARE the holes.
++The public fixture supplies development feedback, not independent ground truth. Investigate its failures as candidate holes.
+@@ -473 +473 @@ ${clampGoal(data.goal)}
+-FIXTURE SCORES (held-out, not the swarm's opinion):
++PUBLIC PRACTICE SCORES (unverified; not private holdout evidence):
+@@ -533,2 +533,2 @@ Return JSON:
+-      verdict,
+-      score: asString(parsed.score, "The judge could not tell if anything closed."),
++      verdict: "stalled",
++      score: "Unverified model opinion, not independent evidence: " + asString(parsed.score, "No verified comparison."),
+@@ -553 +553,4 @@ export async function evaluateArtifact(
+-  const level = Math.max(0, Math.min(maxFixtureLevel(data.labId), Number(data.level) || 0));
++  boundedText(data.deliverable, "artifact", MAX_ARTIFACT, 1);
++  boundedText(data.title, "title", 2000);
++  boundedText(data.userTest ?? "", "userTest", MAX_USER_TEST);
++  const level = data.level ?? 0;
+@@ -561 +564 @@ export async function evaluateArtifact(
+-      system: `${data.title}\n${data.deliverable}`.slice(0, 2400) +
++      system: `${data.title}\n${data.deliverable}` +
+@@ -574 +577 @@ export async function evaluateArtifact(
+-      return { ok: true, ...graded, evidence: `Fixture run failed (${executed.error}). Checklist only.` };
++      return { ok: true, ...graded, evidence: `Practice execution failed (${executed.error}). No execution credit.` };
