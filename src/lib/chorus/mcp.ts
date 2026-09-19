@@ -1,6 +1,6 @@
 import { LABS } from "./labs.ts";
 import { examFor, gradeArtifact } from "./grade.ts";
-import { dropSession, recordScore, resetSitting, sittingFor, sittingPairs, sittingSnapshot, sittingToRun } from "./mcp-sitting.ts";
+import { applySittingUpdate, dropSession, recordScore, resetSitting, sittingFor, sittingPairs, sittingSnapshot, sittingToRun } from "./mcp-sitting.ts";
 
 export const MCP_PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"] as const;
 
@@ -37,9 +37,11 @@ const SITTING_PROMPT = `You are running a Chorus sitting. You (the host model) a
 
 1. chorus_labs — pick ONE lab. Stay on it.
 2. chorus_score the user's paste as gen 0. Weak is correct. If the lab executes, chorus_exam first, run that input under the artifact, then chorus_score with findings JSON {findings:[{issue, quote}]}. quote must be a verbatim line from exam.input, not from your spec.
-3. Recurse only on failed plants. A later score beating an earlier one writes a pair.
-4. Stop when exhausted is true, or at 8 generations. Then chorus_pairs.
-5. If generation is 8 or you need a clean ledger, chorus_new_sitting or chorus_score with reset:true. Same MCP URL.
+3. chorus_sitting with contract plus 3 non-overlapping specialists. Then chorus_sitting specialist+patch for each. chorus_sitting merge for the deliverable. Score the merge.
+4. Recurse only on failed plants. A later score beating an earlier one writes a pair.
+5. If a different model sat the exam, chorus_score executor with that model name — otherwise the pair is contaminated.
+6. Stop when exhausted is true, or at 8 generations. chorus_pairs.
+7. Generation 8 or a new lab: chorus_sitting with reset:true. Same MCP URL.
 
 Do not ask the user for an API key. You are the model.`;
 
@@ -75,6 +77,7 @@ const TOOLS = [
         level: { type: "number" },
         userTest: { type: "string" },
         goal: { type: "string" },
+        executor: { type: "string", description: "Model that sat the exam. Omit if this host ran it (pair is contaminated)." },
         reset: { type: "boolean", description: "Wipe this sitting first (same MCP URL). Use when generation is 8." },
       },
       required: ["artifact"],
@@ -82,8 +85,27 @@ const TOOLS = [
   },
   {
     name: "chorus_sitting",
-    description: "Current sitting on this MCP session: scores, failures, pair count.",
-    inputSchema: { type: "object", properties: {} },
+    description:
+      "Sitting status, or mutate it. reset:true wipes in place. contract + specialists staffs the swarm. specialist + patch records a seat. merge records the deliverable. executor names a second model.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        reset: { type: "boolean" },
+        labId: { type: "string" },
+        contract: { type: "string" },
+        specialists: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { name: { type: "string" }, mandate: { type: "string" } },
+          },
+        },
+        specialist: { type: "string" },
+        patch: { type: "string" },
+        merge: { type: "string" },
+        executor: { type: "string" },
+      },
+    },
   },
   {
     name: "chorus_new_sitting",
@@ -181,7 +203,13 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
       userTest: args.userTest ? String(args.userTest) : undefined,
       level: Number(args.level) || 0,
     });
-    const recorded = await recordScore(sessionId, artifact, graded, args.goal ? String(args.goal) : "");
+    const recorded = await recordScore(
+      sessionId,
+      artifact,
+      graded,
+      args.goal ? String(args.goal) : "",
+      args.executor ? String(args.executor) : undefined,
+    );
     const exhausted = Boolean(graded.exhausted);
     return textResult({
       ...graded,
@@ -211,15 +239,41 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
     });
   }
   if (name === "chorus_sitting") {
+    const mutated =
+      args.reset === true ||
+      args.contract ||
+      args.specialists ||
+      args.patch ||
+      args.merge ||
+      args.executor ||
+      args.labId;
+    if (mutated) {
+      await applySittingUpdate(sessionId, {
+        reset: args.reset === true,
+        labId: args.labId ? String(args.labId) : undefined,
+        contract: args.contract ? String(args.contract) : undefined,
+        specialists: Array.isArray(args.specialists)
+          ? (args.specialists as { name?: string; mandate?: string }[])
+          : undefined,
+        specialist: args.specialist ? String(args.specialist) : undefined,
+        patch: args.patch ? String(args.patch) : undefined,
+        merge: args.merge ? String(args.merge) : undefined,
+        executor: args.executor ? String(args.executor) : undefined,
+      });
+    }
     const snap = await sittingSnapshot(sessionId);
     return textResult(snap ?? { error: "No sitting yet. Call chorus_score." }, !snap);
   }
   if (name === "chorus_pairs") {
     const pairs = await sittingPairs(sessionId);
+    const clean = pairs.filter((row) => !row.contaminated);
     return textResult({
       count: pairs.length,
+      cleanCount: clean.length,
       jsonl: pairs.map((row) => JSON.stringify(row)).join("\n"),
+      jsonlClean: clean.map((row) => JSON.stringify(row)).join("\n"),
       pairs,
+      clean,
     });
   }
   if (name === "chorus_ledger") {

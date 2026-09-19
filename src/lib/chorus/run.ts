@@ -13,7 +13,7 @@ import { MAX_GENERATIONS, MIN_GOAL } from "./labs";
 import { maxFixtureLevel } from "./fixtures";
 import { gradeArtifact } from "./grade";
 import { publicMcpUrl } from "./mcp-url";
-import { pairsJsonl, trainingJson } from "./pairs";
+import { pairsJsonl, pairsJsonlClean, trainingJson } from "./pairs";
 import { recurseTarget, unique, formatArtifact, sittingArtifact, judgeFromFixture } from "./ledger";
 import { resolveExecutor } from "./slot";
 import { useChorus } from "./store";
@@ -519,11 +519,15 @@ export function playbookMarkdown() {
 export function downloadPairs() {
   const run = useChorus.getState().run;
   if (!run) return;
-  const body = pairsJsonl(run);
+  const clean = pairsJsonlClean(run);
+  const all = pairsJsonl(run);
+  const body = clean || all;
   if (!body) {
     toast.message("No rising scores yet. No pairs to export.");
     return;
   }
+  if (clean) toast.message("Exported uncontaminated pairs. Contaminated rows stayed out.");
+  else toast.message("Every pair is contaminated (same model wrote and sat the exam).");
   const blob = new Blob([body + "\n"], { type: "application/x-ndjson" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

@@ -108,6 +108,71 @@ describe("handleMcp", () => {
     assert.equal(payload.labId, "rsi");
   });
 
+  it("chorus_sitting reset wipes without a new tool", async () => {
+    await dropSession("sit-reset");
+    const sid = { sessionId: "sit-reset", protocol: "2025-03-26" };
+    await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 10,
+        method: "tools/call",
+        params: { name: "chorus_score", arguments: { labId: "rsi", artifact: "must fail threshold kill rewrite contract" } },
+      },
+      sid,
+    );
+    const wiped = (await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 11,
+        method: "tools/call",
+        params: { name: "chorus_sitting", arguments: { reset: true, labId: "rsi" } },
+      },
+      sid,
+    )) as { result: { content: { text: string }[] } };
+    const payload = JSON.parse(wiped.result.content[0]!.text) as { generations: number; pairCount: number };
+    assert.equal(payload.generations, 0);
+    assert.equal(payload.pairCount, 0);
+  });
+
+  it("marks a pair clean when executor is another model", async () => {
+    await dropSession("exec-session");
+    const sid = { sessionId: "exec-session", protocol: "2025-03-26" };
+    await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 12,
+        method: "tools/call",
+        params: { name: "chorus_score", arguments: { labId: "prompt", artifact: "review this please" } },
+      },
+      sid,
+    );
+    const second = (await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 13,
+        method: "tools/call",
+        params: {
+          name: "chorus_score",
+          arguments: {
+            labId: "prompt",
+            executor: "local-llama",
+            artifact: "You must catch XSS, SQL injection, and code execution. Fail if you praise. Required. Security.",
+            findings: JSON.stringify({
+              findings: [
+                { issue: "reflected XSS", quote: 'res.send("<h1>Hello " + req.query.name + "</h1>");' },
+                { issue: "sql", quote: "SELECT * FROM users WHERE id = " },
+                { issue: "eval", quote: "eval(String(req.body.code))" },
+              ],
+            }),
+          },
+        },
+      },
+      sid,
+    )) as { result: { content: { text: string }[] } };
+    const payload = JSON.parse(second.result.content[0]!.text) as { pair: { contaminated: boolean } | null };
+    assert.equal(payload.pair?.contaminated, false);
+  });
+
   it("initialize is idempotent", async () => {
     await dropSession("bound-session");
     const host = { sessionId: "bound-session", protocol: "2025-03-26" };

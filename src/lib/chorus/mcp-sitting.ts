@@ -9,6 +9,11 @@ export type McpSitting = {
   level: number;
   artifact0?: string;
   current?: string;
+  executor?: string;
+  contract?: string;
+  specialists?: { id: string; name: string; mandate: string }[];
+  patches?: { specialist: string; patch: string }[];
+  merge?: string;
   scores: { artifact: string; score: number; failed: string[]; passed: string[]; fixture: string }[];
   pairs: PreferencePair[];
 };
@@ -122,9 +127,16 @@ export async function sittingFor(sessionId: string, labId = "prompt"): Promise<M
   return sitting;
 }
 
-export async function recordScore(sessionId: string, artifact: string, graded: EvalResult, goal = "") {
+export function writerRanExam(executor?: string) {
+  const e = (executor ?? "").trim().toLowerCase();
+  return !e || e === "self" || e === "host" || e === "mcp-host" || e === "mcp host" || e === "same";
+}
+
+export async function recordScore(sessionId: string, artifact: string, graded: EvalResult, goal = "", executor?: string) {
   const clipped = artifact.slice(0, MAX_ARTIFACT);
   const sitting = await sittingFor(sessionId, graded.labId);
+  if (executor?.trim()) sitting.executor = executor.trim().slice(0, 80);
+  const contaminated = writerRanExam(sitting.executor);
   sitting.labId = graded.labId;
   sitting.level = graded.level;
   sitting.current = clipped;
@@ -150,10 +162,10 @@ export async function recordScore(sessionId: string, artifact: string, graded: E
       rejected_score: prev.score,
       chosen_score: graded.score,
       fixture: graded.fixture,
-      model: "mcp-host",
+      model: sitting.executor || "mcp-host",
       labId: sitting.labId,
       generation: sitting.scores.length,
-      contaminated: true,
+      contaminated,
     };
     sitting.pairs.push(pair);
   }
@@ -166,17 +178,19 @@ function asEval(
   row: McpSitting["scores"][number],
   labId: string,
   level: number,
+  sitting: McpSitting,
 ): EvalResult {
+  const contaminated = writerRanExam(sitting.executor);
   return {
     labId,
     fixture: row.fixture,
     score: row.score,
     passed: row.passed,
     failed: row.failed,
-    evidence: "MCP host",
+    evidence: sitting.executor || "MCP host",
     level,
-    executor: "MCP host",
-    contaminated: true,
+    executor: sitting.executor || "MCP host",
+    contaminated,
   };
 }
 
@@ -218,16 +232,42 @@ export async function sittingToRun(sessionId: string): Promise<SwarmRun | null> 
       watchouts: row.failed,
       pattern: { contract: "", fanout: "", critique: "", merge: "" },
     },
-    evaluation: asEval(row, sitting.labId, sitting.level),
+    evaluation: asEval(row, sitting.labId, sitting.level, sitting),
   }));
-  const done = (id: Agent["id"], role: Agent["role"], name: string): Agent => ({
-    id,
-    role,
-    name,
-    mandate: "Host writes. Chorus grades.",
-    status: "done",
-    headline: "MCP host",
-  });
+  const staff = (sitting.specialists ?? []).slice(0, 3);
+  const patchOf = (name: string) =>
+    [...(sitting.patches ?? [])].reverse().find((row) => row.specialist.toLowerCase() === name.toLowerCase())?.patch;
+  const agents: Agent[] = [
+    {
+      id: "host",
+      role: "conductor",
+      name: "Conductor",
+      mandate: (sitting.contract || "Host writes. Chorus grades.").slice(0, 400),
+      status: "done",
+      headline: sitting.contract ? "Contract" : "MCP host",
+      body: sitting.contract,
+    },
+    ...staff.map((row, i) => ({
+      id: row.id || `s${i + 1}`,
+      role: "specialist" as const,
+      name: row.name,
+      mandate: row.mandate,
+      status: (patchOf(row.name) ? "done" : "pending") as Agent["status"],
+      headline: patchOf(row.name) ? "Patch" : "Awaiting patch",
+      body: patchOf(row.name),
+    })),
+  ];
+  if (sitting.merge) {
+    agents.push({
+      id: "synthesizer",
+      role: "synthesizer",
+      name: "Synthesizer",
+      mandate: "Merge specialist patches.",
+      status: "done",
+      headline: "Merged",
+      body: sitting.merge,
+    });
+  }
   return {
     id: sitting.id,
     goal: sitting.pairs[0]?.prompt || sitting.labId,
@@ -237,13 +277,13 @@ export async function sittingToRun(sessionId: string): Promise<SwarmRun | null> 
     phase: "done",
     generation: sitting.scores.length,
     generations,
-    agents: [done("host", "conductor", "MCP host")],
+    agents,
     synthesis: generations.at(-1)?.synthesis,
-    evaluation: asEval(last, sitting.labId, sitting.level),
+    evaluation: asEval(last, sitting.labId, sitting.level, sitting),
     fixtureLevel: sitting.level,
     pastedArtifact: sitting.artifact0,
-    baseline: asEval(first, sitting.labId, sitting.level),
-    slotSnapshot: { mode: "custom", model: "mcp-host", baseUrl: "mcp" },
+    baseline: asEval(first, sitting.labId, sitting.level, sitting),
+    slotSnapshot: { mode: "custom", model: sitting.executor || "mcp-host", baseUrl: "mcp" },
   };
 }
 
@@ -258,7 +298,49 @@ export async function sittingSnapshot(sessionId: string) {
     currentScore: sitting.scores.at(-1)?.score ?? null,
     failed: sitting.scores.at(-1)?.failed ?? [],
     pairCount: sitting.pairs.length,
+    executor: sitting.executor ?? null,
+    specialists: (sitting.specialists ?? []).map((row) => row.name),
+    contract: Boolean(sitting.contract),
+    patches: sitting.patches?.length ?? 0,
   };
+}
+
+export async function applySittingUpdate(
+  sessionId: string,
+  args: {
+    labId?: string;
+    reset?: boolean;
+    contract?: string;
+    specialists?: { name?: string; mandate?: string }[];
+    specialist?: string;
+    patch?: string;
+    merge?: string;
+    executor?: string;
+  },
+) {
+  if (args.reset) {
+    await resetSitting(sessionId, args.labId || "rsi");
+  }
+  const sitting = await sittingFor(sessionId, args.labId || "rsi");
+  if (args.labId) sitting.labId = args.labId;
+  if (args.executor?.trim()) sitting.executor = args.executor.trim().slice(0, 80);
+  if (args.contract?.trim()) sitting.contract = args.contract.trim().slice(0, 8000);
+  if (Array.isArray(args.specialists) && args.specialists.length) {
+    sitting.specialists = args.specialists.slice(0, 3).map((row, i) => ({
+      id: `s${i + 1}`,
+      name: String(row.name || `Specialist ${i + 1}`).slice(0, 80),
+      mandate: String(row.mandate || "").slice(0, 800),
+    }));
+  }
+  if (args.specialist?.trim() && args.patch?.trim()) {
+    sitting.patches = [
+      ...(sitting.patches ?? []),
+      { specialist: args.specialist.trim().slice(0, 80), patch: args.patch.trim().slice(0, 8000) },
+    ].slice(-12);
+  }
+  if (args.merge?.trim()) sitting.merge = args.merge.trim().slice(0, 24_000);
+  await saveToDb(sitting);
+  return sitting;
 }
 
 export async function sittingPairs(sessionId: string) {

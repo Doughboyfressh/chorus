@@ -123,6 +123,7 @@ export function ModelSlotPanel() {
             <li>Tell the host: run the Chorus sitting. Score a weak gen 0 first.</li>
             <li>This tab polls the same sitting. When the score rises, export the pairs.</li>
             <li>New sitting wipes this URL in place. Grok stays connected.</li>
+            <li>A domain is a Vercel alias when you have one. The sitting URL is the account.</li>
           </ol>
           {previewHost ? (
             <p className="mt-3 text-sm leading-relaxed text-warn">

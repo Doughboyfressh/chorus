@@ -69,24 +69,37 @@ export function pairsJsonl(run: SwarmRun) {
     .join("\n");
 }
 
+export function cleanPairs(run: SwarmRun) {
+  return preferencePairs(run).filter((row) => !row.contaminated);
+}
+
+export function pairsJsonlClean(run: SwarmRun) {
+  return cleanPairs(run)
+    .map((row) => JSON.stringify(row))
+    .join("\n");
+}
+
 export type TrainingPack = {
   v: 1;
   model: string;
   labId: string;
   note: string;
   dpo: PreferencePair[];
+  dpoClean: PreferencePair[];
   sft: { messages: { role: "user" | "assistant"; content: string }[] }[];
 };
 
 export function trainingPack(run: SwarmRun): TrainingPack {
   const dpo = preferencePairs(run);
+  const dpoClean = dpo.filter((row) => !row.contaminated);
   return {
     v: 1,
     model: run.slotSnapshot?.model ?? "unknown",
     labId: run.labId ?? "generic",
-    note: "Chorus does not train weights. Load dpo into your trainer. Drop rows where contaminated is true if the writer also ran the exam.",
+    note: "dpoClean is the train set. dpo includes contaminated rows (same model wrote and sat the exam).",
     dpo,
-    sft: dpo.map((row) => ({
+    dpoClean,
+    sft: dpoClean.map((row) => ({
       messages: [
         { role: "user" as const, content: row.prompt },
         { role: "assistant" as const, content: row.chosen },
