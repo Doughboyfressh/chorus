@@ -6,6 +6,15 @@ import { dropSession } from "./mcp-sitting.ts";
 
 const ctx = { sessionId: "test-session", protocol: "2025-03-26" };
 
+async function tool(
+  sid: { sessionId: string; protocol: string },
+  id: number,
+  name: string,
+  args: Record<string, unknown> = {},
+) {
+  return handleMcp({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } }, sid);
+}
+
 describe("handleMcp", () => {
   it("initializes without hosting a model", async () => {
     const res = (await handleMcp({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }, ctx)) as {
@@ -34,15 +43,8 @@ describe("handleMcp", () => {
   it("records a pair when the score rises", async () => {
     await dropSession("pair-session");
     const sid = { sessionId: "pair-session", protocol: "2025-03-26" };
-    await handleMcp(
-      {
-        jsonrpc: "2.0",
-        id: 3,
-        method: "tools/call",
-        params: { name: "chorus_score", arguments: { labId: "prompt", artifact: "review this please" } },
-      },
-      sid,
-    );
+    await tool(sid, 2, "chorus_exam", { labId: "prompt", level: 0 });
+    await tool(sid, 3, "chorus_score", { labId: "prompt", artifact: "review this please" });
     const second = (await handleMcp(
       {
         jsonrpc: "2.0",
@@ -80,15 +82,8 @@ describe("handleMcp", () => {
   it("wipes the sitting in place", async () => {
     await dropSession("reset-session");
     const sid = { sessionId: "reset-session", protocol: "2025-03-26" };
-    await handleMcp(
-      {
-        jsonrpc: "2.0",
-        id: 8,
-        method: "tools/call",
-        params: { name: "chorus_score", arguments: { labId: "rsi", artifact: "must fail threshold kill rewrite contract" } },
-      },
-      sid,
-    );
+    await tool(sid, 7, "chorus_exam", { labId: "rsi", level: 0 });
+    await tool(sid, 8, "chorus_score", { labId: "rsi", artifact: "must fail threshold kill rewrite contract" });
     const wiped = (await handleMcp(
       {
         jsonrpc: "2.0",
@@ -111,15 +106,8 @@ describe("handleMcp", () => {
   it("chorus_sitting reset wipes without a new tool", async () => {
     await dropSession("sit-reset");
     const sid = { sessionId: "sit-reset", protocol: "2025-03-26" };
-    await handleMcp(
-      {
-        jsonrpc: "2.0",
-        id: 10,
-        method: "tools/call",
-        params: { name: "chorus_score", arguments: { labId: "rsi", artifact: "must fail threshold kill rewrite contract" } },
-      },
-      sid,
-    );
+    await tool(sid, 9, "chorus_exam", { labId: "rsi", level: 0 });
+    await tool(sid, 10, "chorus_score", { labId: "rsi", artifact: "must fail threshold kill rewrite contract" });
     const wiped = (await handleMcp(
       {
         jsonrpc: "2.0",
@@ -137,15 +125,8 @@ describe("handleMcp", () => {
   it("marks a pair clean when executor is another model", async () => {
     await dropSession("exec-session");
     const sid = { sessionId: "exec-session", protocol: "2025-03-26" };
-    await handleMcp(
-      {
-        jsonrpc: "2.0",
-        id: 12,
-        method: "tools/call",
-        params: { name: "chorus_score", arguments: { labId: "prompt", artifact: "review this please" } },
-      },
-      sid,
-    );
+    await tool(sid, 11, "chorus_exam", { labId: "prompt", level: 0 });
+    await tool(sid, 12, "chorus_score", { labId: "prompt", artifact: "review this please" });
     const second = (await handleMcp(
       {
         jsonrpc: "2.0",
@@ -176,15 +157,8 @@ describe("handleMcp", () => {
   it("keeps grok-named executor contaminated", async () => {
     await dropSession("grok-exec");
     const sid = { sessionId: "grok-exec", protocol: "2025-03-26" };
-    await handleMcp(
-      {
-        jsonrpc: "2.0",
-        id: 14,
-        method: "tools/call",
-        params: { name: "chorus_score", arguments: { labId: "prompt", artifact: "review this please" } },
-      },
-      sid,
-    );
+    await tool(sid, 13, "chorus_exam", { labId: "prompt", level: 0 });
+    await tool(sid, 14, "chorus_score", { labId: "prompt", artifact: "review this please" });
     const second = (await handleMcp(
       {
         jsonrpc: "2.0",
@@ -298,18 +272,8 @@ describe("handleMcp", () => {
       },
       sid,
     );
-    await handleMcp(
-      {
-        jsonrpc: "2.0",
-        id: 41,
-        method: "tools/call",
-        params: {
-          name: "chorus_score",
-          arguments: { labId: "rsi", artifact: "must fail threshold kill rewrite contract" },
-        },
-      },
-      sid,
-    );
+    await tool(sid, 40, "chorus_exam", { labId: "rsi", level: 0 });
+    await tool(sid, 41, "chorus_score", { labId: "rsi", artifact: "must fail threshold kill rewrite contract" });
     await handleMcp(
       {
         jsonrpc: "2.0",
@@ -341,6 +305,37 @@ describe("handleMcp", () => {
     const seat = JSON.parse(s1.result.content[0]!.text) as { seat: string; role: string };
     assert.equal(seat.seat, "s1");
     assert.notEqual(seat.role.toLowerCase(), "judge");
+  });
+
+  it("rejects score before exam on execute labs", async () => {
+    await dropSession("need-exam");
+    const sid = { sessionId: "need-exam", protocol: "2025-03-26" };
+    const res = (await tool(sid, 50, "chorus_score", { labId: "prompt", artifact: "review this please" })) as {
+      result: { content: { text: string }[]; isError?: boolean };
+    };
+    const payload = JSON.parse(res.result.content[0]!.text) as { error?: string };
+    assert.match(payload.error ?? "", /chorus_exam first/);
+  });
+
+  it("does not mint a pair when only findings change", async () => {
+    await dropSession("same-art");
+    const sid = { sessionId: "same-art", protocol: "2025-03-26" };
+    const artifact = "You must catch XSS, SQL injection, and code execution. Fail if you praise. Required. Security.";
+    await tool(sid, 51, "chorus_exam", { labId: "prompt", level: 0 });
+    await tool(sid, 52, "chorus_score", { labId: "prompt", artifact });
+    const second = (await tool(sid, 53, "chorus_score", {
+      labId: "prompt",
+      artifact,
+      findings: JSON.stringify({
+        findings: [
+          { issue: "reflected XSS", quote: 'res.send("<h1>Hello " + req.query.name + "</h1>");' },
+          { issue: "sql", quote: "SELECT * FROM users WHERE id = " },
+          { issue: "eval", quote: "eval(String(req.body.code))" },
+        ],
+      }),
+    })) as { result: { content: { text: string }[] } };
+    const payload = JSON.parse(second.result.content[0]!.text) as { pair: unknown };
+    assert.equal(payload.pair, null);
   });
 
   it("initialize is idempotent", async () => {

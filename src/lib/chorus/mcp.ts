@@ -1,6 +1,6 @@
 import { LABS } from "./labs.ts";
 import { examFor, gradeArtifact } from "./grade.ts";
-import { applySittingUpdate, dropSession, fillOrchestraSeat, nextOrchestraSeat, recordScore, resetSitting, sittingFor, sittingPairs, sittingSnapshot, sittingToRun } from "./mcp-sitting.ts";
+import { applySittingUpdate, dropSession, examReady, fillOrchestraSeat, markExam, nextOrchestraSeat, recordScore, resetSitting, sittingFor, sittingPairs, sittingSnapshot, sittingToRun } from "./mcp-sitting.ts";
 
 export const MCP_PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"] as const;
 
@@ -35,12 +35,12 @@ function textResult(payload: unknown, isError = false) {
 
 const SITTING_PROMPT = `You are an MCP host for Chorus. Chorus conducts. You play the seats. Chorus grades.
 
-If chorus_next returns a seat: YOU are that role. Produce the JSON it asked for. chorus_fill with that text. Repeat until done is true.
+If chorus_next returns a seat: YOU are that role. Produce the JSON it asked for. chorus_fill with that text. Repeat until done is true. The exam seat: you ARE the artifact. Run exam.input. Do not invent findings to match the plate.
 
 Otherwise a host sitting:
 1. chorus_labs — pick ONE lab. Stay on it.
-2. chorus_score the user's paste as gen 0. Weak is correct. If the lab executes, chorus_exam first, then chorus_score with findings JSON {findings:[{issue, quote}]}. quote is a verbatim line from exam.input.
-3. Recurse only on failed plants. A later score beating an earlier one writes a pair.
+2. chorus_exam first. You are the artifact; exam.input is the user message. Then chorus_score with the findings that run produced. Scoring without exam is rejected.
+3. A later score beating an earlier one writes a pair only if the artifact text changed. Same spec, new JSON is not a pair.
 4. Generation 8: chorus_sitting with reset:true. Same MCP URL.
 
 Do not ask for an API key. You are the model.`;
@@ -54,7 +54,7 @@ const TOOLS = [
   {
     name: "chorus_exam",
     description:
-      "Held-out fixture for a lab. Run task+input with this host as the artifact's system prompt. Return JSON findings, then call chorus_score.",
+      "Held-out fixture. You are the artifact; run task+input. Required before chorus_score on execute labs.",
     inputSchema: {
       type: "object",
       properties: {
@@ -209,7 +209,9 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
   if (name === "chorus_exam") {
     const sitting = await sittingFor(sessionId);
     const labId = args.labId ? String(args.labId) : sitting.labId || "prompt";
-    return textResult(examFor(labId, Number(args.level) || 0, args.userTest ? String(args.userTest) : undefined));
+    const level = Number.isFinite(Number(args.level)) ? Number(args.level) : sitting.level;
+    await markExam(sessionId, labId, level);
+    return textResult(examFor(labId, level, args.userTest ? String(args.userTest) : undefined));
   }
   if (name === "chorus_score") {
     const artifact = String(args.artifact ?? "");
@@ -220,12 +222,17 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
     }
     const current = await sittingFor(sessionId);
     const labId = args.labId ? String(args.labId) : current.labId;
+    const level = Number.isFinite(Number(args.level)) ? Number(args.level) : current.level;
+    const exam = examFor(labId, level, args.userTest ? String(args.userTest) : undefined);
+    if (exam.execute && !examReady(current, labId, level)) {
+      return textResult({ error: "chorus_exam first. Run exam.input under the artifact, then score those findings." }, true);
+    }
     const graded = gradeArtifact({
       labId,
       deliverable: artifact,
       findings: args.findings ? String(args.findings) : undefined,
       userTest: args.userTest ? String(args.userTest) : undefined,
-      level: Number(args.level) || 0,
+      level,
     });
     const recorded = await recordScore(
       sessionId,

@@ -1,5 +1,5 @@
 import { extractJson } from "./parse.ts";
-import { gradeArtifact } from "./grade.ts";
+import { examFor, gradeArtifact } from "./grade.ts";
 import { labBrief, resolveGoal } from "./labs.ts";
 import type { Agent } from "./types.ts";
 
@@ -10,19 +10,21 @@ export type SeatId =
   | "s3"
   | "critic"
   | "synthesizer"
+  | "exam"
   | "improver"
   | "judge";
 
 export type Orchestra = {
   labId?: string;
+  level?: number;
   goal: string;
   pasted?: string;
   mode: "gen1" | "recurse";
   filled: Partial<Record<SeatId, string>>;
 };
 
-const GEN1: SeatId[] = ["conductor", "s1", "s2", "s3", "critic", "synthesizer"];
-const RECURSE: SeatId[] = ["improver", "s1", "s2", "s3", "critic", "synthesizer", "judge"];
+const GEN1: SeatId[] = ["conductor", "s1", "s2", "s3", "critic", "synthesizer", "exam"];
+const RECURSE: SeatId[] = ["improver", "s1", "s2", "s3", "critic", "synthesizer", "exam", "judge"];
 
 function order(mode: Orchestra["mode"]) {
   return mode === "recurse" ? RECURSE : GEN1;
@@ -44,10 +46,12 @@ export function startOrchestraState(args: {
   pasted?: string;
   recurse?: boolean;
   priorStaff?: string;
+  level?: number;
 }): Orchestra {
   const labId = args.labId || "rsi";
   return {
     labId,
+    level: args.level ?? 0,
     goal: resolveGoal(labId, args.goal),
     pasted: args.pasted ? clip(args.pasted, 8000) : undefined,
     mode: args.recurse ? "recurse" : "gen1",
@@ -268,6 +272,27 @@ Return JSON:
 {"contract":"next contract","whyThisSplit":"one sentence","specialists":[{"id":"s1","name":"Mutation Operator","mandate":"job","lens":"lens"},{"id":"s2","name":"Numeric Gate","mandate":"job","lens":"lens"},{"id":"s3","name":"Holdout Warden","mandate":"job","lens":"lens"}]}`,
     };
   }
+  if (seat === "exam") {
+    const exam = examFor(orch.labId, orch.level ?? 0);
+    const artifact = mergeDeliverable(orch) || orch.pasted || "";
+    return {
+      seat,
+      role: "Exam",
+      user: `You are NOT the grader. You ARE this artifact — run it as the system spec. Do not invent findings to match a plate. Return only what this spec produces on the input.
+
+ARTIFACT:
+${artifact.slice(0, 8000)}
+
+TASK:
+${exam.task}
+
+INPUT (quote lines from here if the spec actually cites them):
+${exam.input}
+
+Return JSON:
+{"findings":[{"issue":"what the spec caught","quote":"verbatim line from INPUT"}]}`,
+    };
+  }
   return {
     seat,
     role: "Judge",
@@ -332,6 +357,7 @@ export function orchestraAgents(orch: Orchestra): Agent[] {
     },
     { id: "critic", role: "critic", name: "Critic", mandate: "Find holes." },
     { id: "synthesizer", role: "synthesizer", name: "Synthesizer", mandate: "Merge survivors." },
+    { id: "exam", role: "critic", name: "Exam", mandate: "Run the artifact on the held-out input." },
     { id: "improver", role: "improver", name: "Improver", mandate: "Close open holes." },
     { id: "judge", role: "judge", name: "Judge", mandate: "Did holes close." },
   ];

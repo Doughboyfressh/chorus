@@ -1,9 +1,9 @@
 import { validSitId } from "./mcp-url.ts";
+import { gradeArtifact } from "./grade.ts";
 import type { PreferencePair } from "./pairs.ts";
 import type { Agent, EvalResult, Generation, SwarmRun } from "./types.ts";
 import {
   applyFill,
-  gradeMerge,
   mergeDeliverable,
   orchestraAgents,
   orchestraStaff,
@@ -26,6 +26,7 @@ export type McpSitting = {
   patches?: { specialist: string; patch: string }[];
   merge?: string;
   orchestra?: Orchestra;
+  exam?: { labId: string; level: number };
   scores: {
     artifact: string;
     score: number;
@@ -137,6 +138,17 @@ export async function assertWriter(sessionId: string, writeKey?: string) {
   };
 }
 
+export async function markExam(sessionId: string, labId: string, level: number) {
+  const sitting = await sittingFor(sessionId, labId);
+  sitting.exam = { labId, level };
+  await saveToDb(sitting);
+  return sitting;
+}
+
+export function examReady(sitting: { exam?: { labId: string; level: number } }, labId: string, level: number) {
+  return sitting.exam?.labId === labId && sitting.exam.level === level;
+}
+
 export async function sittingFor(sessionId: string, labId = "prompt"): Promise<McpSitting> {
   const existing = bySession.get(sessionId) ?? (await loadFromDb(sessionId));
   if (existing) return existing;
@@ -187,8 +199,10 @@ export async function recordScore(sessionId: string, artifact: string, graded: E
     executor: sitting.executor,
     contaminated,
   });
+  const sameArtifact =
+    Boolean(prev) && prev!.artifact.replace(/\s+/g, " ").trim() === clipped.replace(/\s+/g, " ").trim();
   let pair: PreferencePair | null = null;
-  if (prev && graded.score > prev.score) {
+  if (prev && graded.score > prev.score && !sameArtifact) {
     pair = {
       prompt: (goal || sitting.labId).slice(0, 800),
       rejected: prev.artifact,
@@ -386,6 +400,7 @@ export async function applySittingUpdate(
       goal: args.goal,
       pasted: args.pasted || sitting.current || sitting.artifact0,
       recurse: sitting.scores.length > 0,
+      level: sitting.level,
       priorStaff:
         sitting.orchestra?.filled.conductor ||
         (sitting.contract
@@ -434,27 +449,35 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
   }
   if (pending === "synthesizer") {
     sitting.merge = sitting.orchestra.filled.synthesizer;
-    const graded = gradeMerge(sitting.orchestra, sitting.labId, sitting.level);
-    if (graded) {
-      const recorded = await recordScore(
-        sessionId,
-        mergeDeliverable(sitting.orchestra) || text,
-        graded,
-        sitting.orchestra.goal,
-        sitting.executor,
-      );
-      recorded.sitting.orchestra = sitting.orchestra;
-      await saveToDb(recorded.sitting);
-      const next = pendingSeat(recorded.sitting.orchestra!);
-      return {
-        filled: pending,
-        pending: next,
-        done: !next,
-        graded,
-        pair: recorded.pair,
-        generation: recorded.sitting.scores.length,
-      };
-    }
+  }
+  if (pending === "exam") {
+    const deliverable = mergeDeliverable(sitting.orchestra) || sitting.current || "";
+    sitting.exam = { labId: sitting.labId, level: sitting.level };
+    const graded = gradeArtifact({
+      labId: sitting.labId,
+      deliverable,
+      findings: text,
+      level: sitting.level,
+    });
+    const recorded = await recordScore(
+      sessionId,
+      deliverable || text,
+      graded,
+      sitting.orchestra.goal,
+      sitting.executor,
+    );
+    recorded.sitting.orchestra = sitting.orchestra;
+    recorded.sitting.exam = sitting.exam;
+    await saveToDb(recorded.sitting);
+    const next = pendingSeat(recorded.sitting.orchestra!);
+    return {
+      filled: pending,
+      pending: next,
+      done: !next,
+      graded,
+      pair: recorded.pair,
+      generation: recorded.sitting.scores.length,
+    };
   }
   await saveToDb(sitting);
   const next = pendingSeat(sitting.orchestra);
