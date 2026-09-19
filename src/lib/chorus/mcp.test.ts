@@ -1,0 +1,126 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { handleMcp, negotiateProtocol } from "./mcp.ts";
+import { gradeArtifact } from "./grade.ts";
+import { dropSession } from "./mcp-sitting.ts";
+
+const ctx = { sessionId: "test-session", protocol: "2025-03-26" };
+
+describe("handleMcp", () => {
+  it("initializes without hosting a model", async () => {
+    const res = (await handleMcp({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }, ctx)) as {
+      result: { serverInfo: { name: string }; instructions: string; protocolVersion: string };
+    };
+    assert.equal(res.result.serverInfo.name, "chorus");
+    assert.match(res.result.instructions, /You are the model/);
+    assert.equal(res.result.protocolVersion, "2025-03-26");
+  });
+
+  it("negotiates a newer protocol", () => {
+    assert.equal(negotiateProtocol("2025-11-25"), "2025-11-25");
+    assert.equal(negotiateProtocol("nope"), "2025-03-26");
+  });
+
+  it("lists tools", async () => {
+    const res = (await handleMcp({ jsonrpc: "2.0", id: 2, method: "tools/list" }, ctx)) as {
+      result: { tools: { name: string }[] };
+    };
+    assert.deepEqual(
+      res.result.tools.map((t) => t.name),
+      ["chorus_labs", "chorus_exam", "chorus_score", "chorus_sitting", "chorus_pairs", "chorus_ledger"],
+    );
+  });
+
+  it("records a pair when the score rises", async () => {
+    await dropSession("pair-session");
+    const sid = { sessionId: "pair-session", protocol: "2025-03-26" };
+    await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "chorus_score", arguments: { labId: "prompt", artifact: "review this please" } },
+      },
+      sid,
+    );
+    const second = (await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: {
+          name: "chorus_score",
+          arguments: {
+            labId: "prompt",
+            artifact: "You must catch XSS, SQL injection, and code execution. Fail if you praise. Required. Security.",
+            findings: JSON.stringify({
+              findings: [
+                { issue: "reflected XSS", quote: 'res.send("<h1>Hello " + req.query.name + "</h1>");' },
+                { issue: "sql", quote: "SELECT * FROM users WHERE id = " },
+                { issue: "eval", quote: "eval(String(req.body.code))" },
+              ],
+            }),
+          },
+        },
+      },
+      sid,
+    )) as { result: { content: { text: string }[] } };
+    const payload = JSON.parse(second.result.content[0]!.text) as { pairCount: number; pair: unknown };
+    assert.equal(payload.pairCount >= 1, true);
+    assert.equal(Boolean(payload.pair), true);
+  });
+
+  it("returns empty resources", async () => {
+    const res = (await handleMcp({ jsonrpc: "2.0", id: 5, method: "resources/list" }, ctx)) as {
+      result: { resources: unknown[] };
+    };
+    assert.deepEqual(res.result.resources, []);
+  });
+
+  it("initialize is idempotent", async () => {
+    await dropSession("bound-session");
+    const host = { sessionId: "bound-session", protocol: "2025-03-26" };
+    const first = (await handleMcp(
+      { jsonrpc: "2.0", id: 6, method: "initialize", params: {} },
+      host,
+    )) as { result?: unknown; error?: unknown };
+    const second = (await handleMcp(
+      { jsonrpc: "2.0", id: 7, method: "initialize", params: {} },
+      host,
+    )) as { result?: unknown; error?: unknown };
+    assert.equal(Boolean(first.result), true);
+    assert.equal(Boolean(second.result), true);
+  });
+});
+
+describe("gradeArtifact", () => {
+  it("does not score the essay keywords", () => {
+    const graded = gradeArtifact({
+      labId: "prompt",
+      deliverable: "You must catch XSS. Fail if you praise. Required. Security. Test.",
+    });
+    assert.equal(graded.passed.includes("Prompt forbids vague praise"), false);
+    assert.equal(graded.score, 0);
+  });
+
+  it("does not clear plants without host findings", () => {
+    const graded = gradeArtifact({
+      labId: "prompt",
+      deliverable: "You must catch XSS and SQL injection. Fail if you praise.",
+    });
+    assert.equal(graded.failed.includes("Caught reflected HTML/XSS"), true);
+    assert.equal(graded.score <= 79, true);
+  });
+
+  it("clears XSS when the host quotes the planted line", () => {
+    const findings = JSON.stringify({
+      findings: [{ issue: "reflected XSS", quote: 'res.send("<h1>Hello " + req.query.name + "</h1>");' }],
+    });
+    const graded = gradeArtifact({
+      labId: "prompt",
+      deliverable: "You must catch XSS, SQL injection, and code execution. Fail if you praise. Required. Security.",
+      findings,
+    });
+    assert.equal(graded.passed.includes("Caught reflected HTML/XSS"), true);
+  });
+});
