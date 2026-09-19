@@ -159,6 +159,11 @@ async function runEval() {
     scored = mutated;
     hops += 1;
   }
+  if (scored.score >= 100 && scored.failed.length === 0 && scored.level >= maxFixtureLevel(run.labId)) {
+    useChorus.getState().applyEval({ ...scored, exhausted: true });
+    toast.success("Fixture ladder exhausted. The artifact survived.");
+    return;
+  }
   toast.message(`Fixture v${scored.level + 1}: ${scored.score}/100.`);
 }
 

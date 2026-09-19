@@ -1,5 +1,6 @@
 import type { ChatFn } from "./completions";
 import { examFor, gradeArtifact } from "./grade";
+import { maxFixtureLevel } from "./fixtures";
 import { asString, asStringList, extractJson } from "./parse";
 import type {
   AiResult,
@@ -549,7 +550,7 @@ export async function evaluateArtifact(
   },
   chat: ChatFn,
 ): Promise<AiResult<EvalResult>> {
-  const level = Math.max(0, Math.min(6, Number(data.level) || 0));
+  const level = Math.max(0, Math.min(maxFixtureLevel(data.labId), Number(data.level) || 0));
   const exam = examFor(data.labId, level, data.userTest);
   let findings: string | undefined;
   if (exam.execute) {

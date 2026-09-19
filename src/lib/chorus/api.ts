@@ -33,8 +33,12 @@ export const proxyChat = createServerFn({ method: "POST" })
   }))
   .handler(async ({ data }): Promise<ChatResult> => {
     try {
-      const { assertSameSiteRequest } = await import("@/lib/auth/isolation.server");
-      assertSameSiteRequest();
+      const { getRequest } = await import("@tanstack/react-start/server");
+      const request = getRequest();
+      const site = request?.headers.get("sec-fetch-site");
+      if (site !== "same-origin") {
+        return { ok: false, error: "This call has to come from the lab." };
+      }
     } catch {
       return { ok: false, error: "This call has to come from the lab." };
     }

@@ -135,8 +135,7 @@ export function Composer() {
             disabled={busy || blocked || pasted.trim().length < 20}
             onClick={() => void scoreBaseline()}
           >
-            Score this
-            {lane === "mcp" ? " in MCP" : ""}
+            Score gen 0
           </Button>
           <p className="text-sm leading-relaxed text-muted">
             {LOOP_LINE}{" "}

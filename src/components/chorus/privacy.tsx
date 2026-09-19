@@ -27,7 +27,7 @@ export function PrivacyPage() {
             A local server (llama.cpp, vLLM, Ollama) never sends the artifact through us. MCP
             sends the artifact and findings so we can grade. That sitting is stored for 14 days,
             keyed by the secret in the MCP URL. Anyone with the URL can read and score it.
-            Rotate it in the lab to revoke.
+            Wipe clears the ledger. New URL rotates the secret and revokes the old one.
           </p>
           <p>
             The pairs you export are yours. Chorus does not train on them. The Train download is a

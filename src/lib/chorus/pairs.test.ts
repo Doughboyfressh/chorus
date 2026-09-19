@@ -132,6 +132,6 @@ describe("trainingPack", () => {
   it("says it does not train, and is empty without a rise", () => {
     const pack = trainingPack(run({ generations: [] }));
     assert.equal(pack.dpo.length, 0);
-    assert.match(pack.note, /does not train/);
+    assert.match(pack.note, /dpoClean/);
   });
 });

@@ -98,11 +98,13 @@ export function hostAgents(): Agent[] {
 }
 
 function normalizeRun(run: SwarmRun): SwarmRun {
+  const mcp = run.slotSnapshot?.baseUrl === "mcp";
   return {
     ...run,
     generation: run.generation ?? 1,
     generations: Array.isArray(run.generations) ? run.generations : [],
-    agents: Array.isArray(run.agents) && run.agents.length > 0 ? run.agents : ghostAgents(),
+    agents:
+      Array.isArray(run.agents) && run.agents.length > 0 ? run.agents : mcp ? hostAgents() : ghostAgents(),
   };
 }
 
@@ -829,12 +831,24 @@ export const useChorus = create<Store>((set, get) => ({
   ingestMcpRun: (incoming) => {
     const next = normalizeRun(incoming);
     const current = get().run;
-    if (
-      current?.id === next.id &&
-      current.generation === next.generation &&
-      current.evaluation?.score === next.evaluation?.score &&
-      (current.evaluation?.failed ?? []).join() === (next.evaluation?.failed ?? []).join()
-    ) {
+    const incomingEmpty =
+      (next.generation ?? 0) === 0 &&
+      !(next.generations?.length) &&
+      !next.evaluation &&
+      !next.baseline;
+    if (incomingEmpty && current?.id === next.id && (current.evaluation || current.baseline)) {
+      return;
+    }
+    const plateKey = (run: SwarmRun) =>
+      [
+        run.generation,
+        run.evaluation?.score,
+        (run.evaluation?.failed ?? []).join(),
+        run.agents.map((a) => `${a.id}:${a.status}`).join(),
+        run.synthesis?.deliverable?.length ?? 0,
+        run.agents.length,
+      ].join("|");
+    if (current?.id === next.id && plateKey(current) === plateKey(next)) {
       return;
     }
     const history = [next, ...get().history.filter((item) => item.id !== next.id)].slice(
@@ -894,7 +908,7 @@ export const useChorus = create<Store>((set, get) => ({
         ? crypto.randomUUID()
         : `run-${Date.now()}`;
     const ancestor: Generation = { ...last, n: 1 };
-    const specialists: Agent[] = last.specialists.map((brief) => ({
+    const specialists: Agent[] = (last.specialists ?? []).map((brief) => ({
       id: brief.id,
       role: "specialist",
       name: brief.name,

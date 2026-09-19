@@ -186,18 +186,21 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
     return textResult(LABS.map((lab) => ({ id: lab.id, title: lab.title, blurb: lab.blurb, goal: lab.goal })));
   }
   if (name === "chorus_exam") {
-    return textResult(
-      examFor(String(args.labId ?? "prompt"), Number(args.level) || 0, args.userTest ? String(args.userTest) : undefined),
-    );
+    const sitting = await sittingFor(sessionId);
+    const labId = args.labId ? String(args.labId) : sitting.labId || "prompt";
+    return textResult(examFor(labId, Number(args.level) || 0, args.userTest ? String(args.userTest) : undefined));
   }
   if (name === "chorus_score") {
     const artifact = String(args.artifact ?? "");
     if (artifact.trim().length < 8) return textResult({ error: "Paste an artifact." }, true);
+    const sitting = await sittingFor(sessionId);
     if (args.reset === true) {
-      await resetSitting(sessionId, args.labId ? String(args.labId) : "rsi");
+      await resetSitting(sessionId, args.labId ? String(args.labId) : sitting.labId);
     }
+    const current = await sittingFor(sessionId);
+    const labId = args.labId ? String(args.labId) : current.labId;
     const graded = gradeArtifact({
-      labId: args.labId ? String(args.labId) : undefined,
+      labId,
       deliverable: artifact,
       findings: args.findings ? String(args.findings) : undefined,
       userTest: args.userTest ? String(args.userTest) : undefined,
@@ -228,8 +231,7 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
     });
   }
   if (name === "chorus_new_sitting") {
-    const labId = args.labId ? String(args.labId) : "rsi";
-    const sitting = await resetSitting(sessionId, labId);
+    const sitting = await resetSitting(sessionId, args.labId ? String(args.labId) : undefined);
     return textResult({
       id: sitting.id,
       labId: sitting.labId,

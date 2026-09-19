@@ -188,7 +188,10 @@ function ipv4Private(ip: string) {
 export function isPrivateAddress(ip: string) {
   const host = ip.toLowerCase().replace(/^\[|\]$/g, "");
   if (host.includes(":")) {
-    if (host === "::1" || host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd")) return true;
+    if (host === "::" || host === "::1") return true;
+    if (host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd")) return true;
+    if (host.startsWith("2001:db8:") || host.startsWith("2002:")) return true;
+    if (host.startsWith("64:ff9b:") || host.startsWith("ff")) return true;
     const mapped = host.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
     if (mapped?.[1]) return ipv4Private(mapped[1]);
     const hexMapped = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);

@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { LOOP_LINE } from "@/lib/chorus/lexicon";
-import { adoptMcpSit, loadMcpSit, sitFromText } from "@/lib/chorus/mcp-url";
+import { adoptMcpSit, loadMcpSit, validSitId } from "@/lib/chorus/mcp-url";
 import { loadSlot, loadLane } from "@/lib/chorus/slot";
 import { listSittings } from "@/lib/chorus/sittings";
 import { loadBaseline, loadHistory, loadSession, useChorus } from "@/lib/chorus/store";
@@ -61,8 +61,8 @@ export function ChorusApp() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const fromUrl = sitFromText(window.location.href);
-    if (fromUrl) adoptMcpSit(fromUrl);
+    const sit = new URLSearchParams(window.location.search).get("sit")?.trim() ?? "";
+    if (sit && validSitId(sit)) adoptMcpSit(sit);
   }, []);
 
   useEffect(() => {

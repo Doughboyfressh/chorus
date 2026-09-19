@@ -173,6 +173,45 @@ describe("handleMcp", () => {
     assert.equal(payload.pair?.contaminated, false);
   });
 
+  it("keeps grok-named executor contaminated", async () => {
+    await dropSession("grok-exec");
+    const sid = { sessionId: "grok-exec", protocol: "2025-03-26" };
+    await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 14,
+        method: "tools/call",
+        params: { name: "chorus_score", arguments: { labId: "prompt", artifact: "review this please" } },
+      },
+      sid,
+    );
+    const second = (await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 15,
+        method: "tools/call",
+        params: {
+          name: "chorus_score",
+          arguments: {
+            labId: "prompt",
+            executor: "grok",
+            artifact: "You must catch XSS, SQL injection, and code execution. Fail if you praise. Required. Security.",
+            findings: JSON.stringify({
+              findings: [
+                { issue: "reflected XSS", quote: 'res.send("<h1>Hello " + req.query.name + "</h1>");' },
+                { issue: "sql", quote: "SELECT * FROM users WHERE id = " },
+                { issue: "eval", quote: "eval(String(req.body.code))" },
+              ],
+            }),
+          },
+        },
+      },
+      sid,
+    )) as { result: { content: { text: string }[] } };
+    const payload = JSON.parse(second.result.content[0]!.text) as { pair: { contaminated: boolean } | null };
+    assert.equal(payload.pair?.contaminated, true);
+  });
+
   it("initialize is idempotent", async () => {
     await dropSession("bound-session");
     const host = { sessionId: "bound-session", protocol: "2025-03-26" };

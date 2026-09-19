@@ -68,7 +68,7 @@ export function recurseTarget(run: SwarmRun): RecurseTarget {
   const evaluation = snap?.evaluation ?? run.evaluation;
   const criticHoles = snap?.critique?.holes ?? run.critique?.holes ?? [];
   const previousNames =
-    run.generations.find((g) => g.n === (run.generation ?? 1) - 1)?.specialists.map((s) => s.name) ??
+    run.generations.find((g) => g.n === (run.generation ?? 1) - 1)?.specialists?.map((s) => s.name) ??
     [];
 
   if (evaluation) {

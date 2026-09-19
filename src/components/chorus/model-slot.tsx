@@ -12,7 +12,7 @@ import {
   type Lane,
   type ModelSlot,
 } from "@/lib/chorus/slot";
-import { adoptMcpSit, loadMcpSit, publicMcpUrl, sitFromText } from "@/lib/chorus/mcp-url";
+import { adoptMcpSit, loadMcpSit, publicMcpUrl, rotateMcpSit, sitFromText } from "@/lib/chorus/mcp-url";
 import { useChorus } from "@/lib/chorus/store";
 import { cn } from "@/lib/utils";
 
@@ -189,6 +189,18 @@ export function ModelSlotPanel() {
             }}
           >
             {wiping ? "Wiping…" : "New sitting"}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              rotateMcpSit();
+              setCopied(false);
+              setSitRev((n) => n + 1);
+              bumpMcpSit();
+            }}
+          >
+            New URL
           </Button>
           </div>
         </div>

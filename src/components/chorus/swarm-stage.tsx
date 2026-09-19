@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { ghostAgents, specialistsOf, useChorus } from "@/lib/chorus/store";
+import { ghostAgents, hostAgents, specialistsOf, useChorus } from "@/lib/chorus/store";
 import type { Agent, AgentStatus } from "@/lib/chorus/types";
 
 function statusTone(status: AgentStatus) {
@@ -38,9 +38,10 @@ function NodeCard({
 
 export function SwarmStage() {
   const run = useChorus((s) => s.run);
+  const lane = useChorus((s) => s.lane);
   const selectedId = useChorus((s) => s.selectedId);
   const setSelected = useChorus((s) => s.setSelected);
-  const agents = run?.agents ?? ghostAgents();
+  const agents = run?.agents ?? (lane === "mcp" ? hostAgents() : ghostAgents());
   const specialists = run ? specialistsOf(run) : agents.filter((a) => a.role === "specialist");
   const conductor = agents.find((a) => a.role === "conductor");
   const critic = agents.find((a) => a.role === "critic");
