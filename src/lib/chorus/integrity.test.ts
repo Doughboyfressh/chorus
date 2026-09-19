@@ -255,7 +255,7 @@ describe("production storage and orchestra integrity", () => {
     assert.ok("error" in await fillOrchestraSeat(id, "exam", good));
     assert.equal((await sittingSnapshot(id))?.generations, 0);
     const filled = await fillOrchestraSeat(id, "exam", good, "attemptId" in exam ? exam.attemptId : undefined);
-    assert.ok("graded" in filled && filled.graded.verified === false);
+    assert.ok("graded" in filled && filled.graded?.verified === false);
     assert.equal((await sittingSnapshot(id))?.generations, 1);
     assert.ok("error" in await fillOrchestraSeat(id, "exam", good, "attemptId" in exam ? exam.attemptId : undefined));
   });
