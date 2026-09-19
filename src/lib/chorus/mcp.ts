@@ -1,6 +1,6 @@
 import { LABS } from "./labs.ts";
 import { examFor, gradeArtifact } from "./grade.ts";
-import { dropSession, recordScore, sittingFor, sittingPairs, sittingSnapshot, sittingToRun } from "./mcp-sitting.ts";
+import { dropSession, recordScore, resetSitting, sittingFor, sittingPairs, sittingSnapshot, sittingToRun } from "./mcp-sitting.ts";
 
 export const MCP_PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"] as const;
 
@@ -40,8 +40,8 @@ const SITTING_PROMPT = `You are running a Chorus sitting. You (the host model) a
 3. Write a contract and staff 3 non-overlapping specialists. Each specialist returns a PATCH of the artifact, not a comment.
 4. Merge into one deliverable.
 5. chorus_exam + run it yourself + chorus_score. A rising score writes a preference pair.
-6. Recurse on fixture failures only. Stop at 8 generations or when the fixture is exhausted.
-7. chorus_pairs when done.
+6. Recurse on fixture failures only. Stop at 8 generations or when the fixture is exhausted. Then chorus_new_sitting — same URL, empty ledger.
+7. chorus_pairs when a later score beats an earlier one.
 
 Do not ask the user for an API key. You are the model.`;
 
@@ -77,6 +77,7 @@ const TOOLS = [
         level: { type: "number" },
         userTest: { type: "string" },
         goal: { type: "string" },
+        reset: { type: "boolean", description: "Wipe this sitting first (same MCP URL). Use when generation is 8." },
       },
       required: ["artifact"],
     },
@@ -85,6 +86,15 @@ const TOOLS = [
     name: "chorus_sitting",
     description: "Current sitting on this MCP session: scores, failures, pair count.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "chorus_new_sitting",
+    description:
+      "Wipe this sitting in place. Same MCP URL, empty ledger, pairCount 0. Pass labId to pin the next lab (rsi | prompt | eval | stress | data | generic).",
+    inputSchema: {
+      type: "object",
+      properties: { labId: { type: "string" } },
+    },
   },
   {
     name: "chorus_pairs",
@@ -163,6 +173,9 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
   if (name === "chorus_score") {
     const artifact = String(args.artifact ?? "");
     if (artifact.trim().length < 8) return textResult({ error: "Paste an artifact." }, true);
+    if (args.reset === true) {
+      await resetSitting(sessionId, args.labId ? String(args.labId) : "rsi");
+    }
     const graded = gradeArtifact({
       labId: args.labId ? String(args.labId) : undefined,
       deliverable: artifact,
@@ -177,6 +190,21 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
       pair: recorded.pair,
       pairCount: recorded.sitting.pairs.length,
       generation: recorded.sitting.scores.length,
+      capped: recorded.capped ?? false,
+      hint: recorded.capped
+        ? "Generation cap 8. Call chorus_new_sitting (same URL) or chorus_score with reset:true."
+        : undefined,
+    });
+  }
+  if (name === "chorus_new_sitting") {
+    const labId = args.labId ? String(args.labId) : "rsi";
+    const sitting = await resetSitting(sessionId, labId);
+    return textResult({
+      id: sitting.id,
+      labId: sitting.labId,
+      generations: 0,
+      pairCount: 0,
+      note: "Same MCP URL. Ledger wiped. Score a weak gen 0 first if you want pairs.",
     });
   }
   if (name === "chorus_sitting") {

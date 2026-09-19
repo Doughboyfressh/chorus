@@ -133,7 +133,7 @@ export async function recordScore(sessionId: string, artifact: string, graded: E
   const prev = sitting.scores.at(-1);
   if (sitting.scores.length >= 8) {
     await saveToDb(sitting);
-    return { sitting, pair: null, graded };
+    return { sitting, pair: null, graded, capped: true as const };
   }
   sitting.scores.push({
     artifact: clipped,
@@ -159,7 +159,7 @@ export async function recordScore(sessionId: string, artifact: string, graded: E
   }
   evict();
   await saveToDb(sitting);
-  return { sitting, pair, graded };
+  return { sitting, pair, graded, capped: false as const };
 }
 
 function asEval(
@@ -252,6 +252,21 @@ export async function sittingSnapshot(sessionId: string) {
 export async function sittingPairs(sessionId: string) {
   const sitting = bySession.get(sessionId) ?? (await loadFromDb(sessionId));
   return sitting?.pairs ?? [];
+}
+
+export async function resetSitting(sessionId: string, labId = "rsi") {
+  const existing = bySession.get(sessionId) ?? (await loadFromDb(sessionId));
+  const sitting: McpSitting = {
+    id: sessionId,
+    labId,
+    level: 0,
+    scores: [],
+    pairs: [],
+    lock: existing?.lock,
+  };
+  bySession.set(sessionId, sitting);
+  await saveToDb(sitting);
+  return sitting;
 }
 
 export async function dropSession(sessionId: string) {

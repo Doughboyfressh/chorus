@@ -27,7 +27,7 @@ describe("handleMcp", () => {
     };
     assert.deepEqual(
       res.result.tools.map((t) => t.name),
-      ["chorus_labs", "chorus_exam", "chorus_score", "chorus_sitting", "chorus_pairs", "chorus_ledger"],
+      ["chorus_labs", "chorus_exam", "chorus_score", "chorus_sitting", "chorus_new_sitting", "chorus_pairs", "chorus_ledger"],
     );
   });
 
@@ -75,6 +75,37 @@ describe("handleMcp", () => {
       result: { resources: unknown[] };
     };
     assert.deepEqual(res.result.resources, []);
+  });
+
+  it("wipes the sitting in place", async () => {
+    await dropSession("reset-session");
+    const sid = { sessionId: "reset-session", protocol: "2025-03-26" };
+    await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 8,
+        method: "tools/call",
+        params: { name: "chorus_score", arguments: { labId: "rsi", artifact: "must fail threshold kill rewrite contract" } },
+      },
+      sid,
+    );
+    const wiped = (await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 9,
+        method: "tools/call",
+        params: { name: "chorus_new_sitting", arguments: { labId: "rsi" } },
+      },
+      sid,
+    )) as { result: { content: { text: string }[] } };
+    const payload = JSON.parse(wiped.result.content[0]!.text) as {
+      generations: number;
+      pairCount: number;
+      labId: string;
+    };
+    assert.equal(payload.generations, 0);
+    assert.equal(payload.pairCount, 0);
+    assert.equal(payload.labId, "rsi");
   });
 
   it("initialize is idempotent", async () => {
