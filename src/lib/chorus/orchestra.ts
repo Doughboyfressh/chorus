@@ -32,11 +32,18 @@ function clip(text: string, n: number) {
   return text.trim().slice(0, n);
 }
 
+const DEFAULT_STAFF = [
+  { id: "s1", name: "Mutation Operator", mandate: "Name how the artifact text will change this generation.", lens: "diffs" },
+  { id: "s2", name: "Numeric Gate", mandate: "Put a numeric kill on the loop. Rename is not progress.", lens: "thresholds" },
+  { id: "s3", name: "Holdout Warden", mandate: "Refuse theater. Frozen work stays frozen.", lens: "stalls" },
+];
+
 export function startOrchestraState(args: {
   labId?: string;
   goal?: string;
   pasted?: string;
   recurse?: boolean;
+  priorStaff?: string;
 }): Orchestra {
   const labId = args.labId || "rsi";
   return {
@@ -44,7 +51,7 @@ export function startOrchestraState(args: {
     goal: resolveGoal(labId, args.goal),
     pasted: args.pasted ? clip(args.pasted, 8000) : undefined,
     mode: args.recurse ? "recurse" : "gen1",
-    filled: {},
+    filled: args.recurse && args.priorStaff?.trim() ? { conductor: args.priorStaff } : {},
   };
 }
 
@@ -68,9 +75,11 @@ function parseConductor(text: string) {
       whyThisSplit: String(parsed.whyThisSplit || "Non-overlapping mandates.").slice(0, 400),
       specialists: specialists.map((row, i) => ({
         id: `s${i + 1}`,
-        name: String(row.name || `Specialist ${i + 1}`).slice(0, 80),
-        mandate: String(row.mandate || "A distinct job.").slice(0, 400),
-        lens: String(row.lens || "A unique failure mode.").slice(0, 200),
+        name: /^judge$/i.test(String(row.name || ""))
+          ? DEFAULT_STAFF[i]!.name
+          : String(row.name || DEFAULT_STAFF[i]!.name).slice(0, 80),
+        mandate: String(row.mandate || DEFAULT_STAFF[i]!.mandate).slice(0, 400),
+        lens: String(row.lens || DEFAULT_STAFF[i]!.lens).slice(0, 200),
       })),
     };
   } catch {
@@ -113,11 +122,16 @@ function parseMerge(text: string) {
 }
 
 function staffOf(orch: Orchestra) {
-  return orch.filled.conductor ? parseConductor(orch.filled.conductor).specialists : [];
+  const fromImprover = orch.filled.improver ? parseConductor(orch.filled.improver).specialists : [];
+  const fromConductor = orch.filled.conductor ? parseConductor(orch.filled.conductor).specialists : [];
+  const staff = fromImprover.length ? fromImprover : fromConductor;
+  return staff.length ? staff : DEFAULT_STAFF;
 }
 
 function contractOf(orch: Orchestra) {
-  return orch.filled.conductor ? parseConductor(orch.filled.conductor).contract : "";
+  if (orch.filled.improver) return parseConductor(orch.filled.improver).contract;
+  if (orch.filled.conductor) return parseConductor(orch.filled.conductor).contract;
+  return "";
 }
 
 export function pendingSeat(orch: Orchestra): SeatId | null {
@@ -136,7 +150,6 @@ export function seatPrompt(orch: Orchestra, seat: SeatId) {
     : "";
   const staff = staffOf(orch);
   const contract = contractOf(orch) || "Deliver a testable artifact.";
-  const seatBrief = staff[["s1", "s2", "s3"].indexOf(seat)];
   const patches = (["s1", "s2", "s3"] as const)
     .map((id) => {
       const row = staff[["s1", "s2", "s3"].indexOf(id)];
@@ -166,7 +179,8 @@ Return JSON:
 Exactly 3 specialists. Names are roles, not cute. Do not staff a trading desk, a tutor, or any other product than this lab.`,
     };
   }
-  if (seatBrief && (seat === "s1" || seat === "s2" || seat === "s3")) {
+  if (seat === "s1" || seat === "s2" || seat === "s3") {
+    const seatBrief = staff[["s1", "s2", "s3"].indexOf(seat)] ?? DEFAULT_STAFF[["s1", "s2", "s3"].indexOf(seat)]!;
     return {
       seat,
       role: seatBrief.name,
@@ -237,7 +251,7 @@ Return JSON:
     return {
       seat,
       role: "Improver",
-      user: `You are the Improver. Open holes are the next contract. Rewrite so the next staff closes them.
+      user: `You are the Improver. Open holes are the next contract. Rewrite so the next staff closes them. You MUST return 3 specialists. Do not name them Judge.
 
 ${stay}
 
@@ -246,16 +260,20 @@ ${goal}
 
 Current contract:
 ${contract}
+Current staff:
+${staff.map((row) => `${row.name} — ${row.mandate}`).join("\n")}
 ${pasted}
 
 Return JSON:
-{"contract":"next contract","whyThisSplit":"one sentence","specialists":[{"id":"s1","name":"Role","mandate":"job","lens":"lens"}]}`,
+{"contract":"next contract","whyThisSplit":"one sentence","specialists":[{"id":"s1","name":"Mutation Operator","mandate":"job","lens":"lens"},{"id":"s2","name":"Numeric Gate","mandate":"job","lens":"lens"},{"id":"s3","name":"Holdout Warden","mandate":"job","lens":"lens"}]}`,
     };
   }
   return {
     seat,
     role: "Judge",
     user: `You are the Judge. Did named holes actually close? Slogans do not count.
+
+${stay}
 
 Goal:
 ${goal}
@@ -264,7 +282,7 @@ Contract:
 ${contract}
 
 Merge:
-${orch.filled.synthesizer ?? ""}
+${orch.filled.synthesizer ?? orch.pasted ?? ""}
 
 Return JSON:
 {"verdict":"improved|stalled|worse","score":"one sentence","holes":[{"hole":"name","status":"closed|open"}]}`,

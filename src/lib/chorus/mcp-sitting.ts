@@ -167,7 +167,10 @@ export async function recordScore(sessionId: string, artifact: string, graded: E
   if (executor?.trim()) sitting.executor = executor.trim().slice(0, 80);
   const contaminated = writerRanExam(sitting.executor);
   sitting.labId = graded.labId;
-  sitting.level = graded.level;
+  sitting.level =
+    graded.score >= 100 && graded.failed.length === 0 && !graded.exhausted
+      ? graded.level + 1
+      : graded.level;
   sitting.current = clipped;
   if (!sitting.artifact0) sitting.artifact0 = clipped;
   const prev = sitting.scores.at(-1);
@@ -383,6 +386,14 @@ export async function applySittingUpdate(
       goal: args.goal,
       pasted: args.pasted || sitting.current || sitting.artifact0,
       recurse: sitting.scores.length > 0,
+      priorStaff:
+        sitting.orchestra?.filled.conductor ||
+        (sitting.contract
+          ? JSON.stringify({
+              contract: sitting.contract,
+              specialists: sitting.specialists ?? [],
+            })
+          : undefined),
     });
   }
   await saveToDb(sitting);

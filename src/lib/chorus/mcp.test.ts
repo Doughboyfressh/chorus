@@ -283,6 +283,66 @@ describe("handleMcp", () => {
     assert.doesNotMatch(seat.user, /^rsi$/m);
   });
 
+  it("recurse specialists are not the judge", async () => {
+    await dropSession("recurse-judge");
+    const sid = { sessionId: "recurse-judge", protocol: "2025-03-26" };
+    await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 40,
+        method: "tools/call",
+        params: {
+          name: "chorus_sitting",
+          arguments: { conduct: true, labId: "rsi", goal: "Design a recursive self-improvement loop" },
+        },
+      },
+      sid,
+    );
+    await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 41,
+        method: "tools/call",
+        params: {
+          name: "chorus_score",
+          arguments: { labId: "rsi", artifact: "must fail threshold kill rewrite contract" },
+        },
+      },
+      sid,
+    );
+    await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 42,
+        method: "tools/call",
+        params: { name: "chorus_sitting", arguments: { conduct: true, labId: "rsi" } },
+      },
+      sid,
+    );
+    const first = (await handleMcp(
+      { jsonrpc: "2.0", id: 43, method: "tools/call", params: { name: "chorus_next", arguments: {} } },
+      sid,
+    )) as { result: { content: { text: string }[] } };
+    const improver = JSON.parse(first.result.content[0]!.text) as { seat: string };
+    assert.equal(improver.seat, "improver");
+    await handleMcp(
+      {
+        jsonrpc: "2.0",
+        id: 44,
+        method: "tools/call",
+        params: { name: "chorus_fill", arguments: { seat: "improver", text: "stalled. no merge." } },
+      },
+      sid,
+    );
+    const s1 = (await handleMcp(
+      { jsonrpc: "2.0", id: 45, method: "tools/call", params: { name: "chorus_next", arguments: {} } },
+      sid,
+    )) as { result: { content: { text: string }[] } };
+    const seat = JSON.parse(s1.result.content[0]!.text) as { seat: string; role: string };
+    assert.equal(seat.seat, "s1");
+    assert.notEqual(seat.role.toLowerCase(), "judge");
+  });
+
   it("initialize is idempotent", async () => {
     await dropSession("bound-session");
     const host = { sessionId: "bound-session", protocol: "2025-03-26" };
