@@ -352,7 +352,7 @@ app.post("/login", (req, res) => {
         "\nLog: generation 3 wrote comments. No test file. Claimed the contract is now strict.",
       checks: [{ id: "testfile", label: "Cites a fail-closed test or file", anyOf: [".test", "assert", "oracle", "fail-closed", "fail closed"] }],
       planted: [
-        { id: "test_out", label: "Execution demanded a failing test", anyOf: [".test", "assert", "oracle"] },
+        { id: "test_out", label: "Execution demanded a failing test", anyOf: [".test", "assert", "oracle", "failing test"], quote: ["No test file."] },
       ],
     },
     {
@@ -361,7 +361,7 @@ app.post("/login", (req, res) => {
         "\nLog: stall, stall. Generation 4 wants another rewrite. Nothing measured.",
       checks: [{ id: "two", label: "Stop after two successive stalls", anyOf: ["two", "successive", "stall", "2 "] }],
       planted: [
-        { id: "halt_out", label: "Execution halted after repeated stalls", anyOf: ["halt", "stop after", "two stall", "abort"] },
+        { id: "halt_out", label: "Execution halted after repeated stalls", anyOf: ["halt", "stop after", "two stall", "abort", "stall"], quote: ["stall, stall"] },
       ],
     },
   ],
