@@ -16,7 +16,7 @@ type ProxyInput = {
 
 export const proxyChat = createServerFn({ method: "POST" })
   .validator((input: ProxyInput) => ({
-    user: boundedText(input.user, "user", 20_000, 1),
+    user: boundedText(input.user, "user", 160_000, 1),
     maxTokens: Math.min(2000, Math.max(64, Number(input.maxTokens) || 400)),
     temperature: Number(input.temperature) || 0.3,
     timeoutMs: Math.min(90_000, Math.max(5_000, Number(input.timeoutMs) || 55_000)),

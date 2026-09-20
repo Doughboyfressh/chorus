@@ -1,3 +1,4 @@
+import { unscoredSynthesis } from "./evaluation-state.ts";
 import { create } from "zustand";
 import { HISTORY_LIMIT } from "./labs";
 import { lastCompleteGeneration } from "./ledger";
@@ -341,6 +342,8 @@ type Store = {
   applyCritique: (critique: CritiqueResult) => void;
   applySynthesis: (synthesis: SynthesisResult) => void;
   applyEval: (evaluation: EvalResult) => void;
+  evaluationFailed: (error: string, level?: number) => void;
+  beginEvaluation: () => void;
   beginImprove: () => void;
   applyImprover: (result: ImproveResult) => void;
   beginJudge: () => void;
@@ -576,13 +579,14 @@ export const useChorus = create<Store>((set, get) => ({
     const run = get().run;
     if (!run) return;
     const generation = run.generation ?? 1;
-    const snap = snapshotGeneration({ ...run, synthesis });
+    const unscored = unscoredSynthesis(run, synthesis);
+    const snap = snapshotGeneration(unscored);
     const generations = [
       ...run.generations.filter((g) => g.n !== generation),
       snap,
     ].sort((a, b) => a.n - b.n);
     const next: SwarmRun = {
-      ...run,
+      ...unscored,
       phase: "eval",
       generation,
       generations,
@@ -602,16 +606,30 @@ export const useChorus = create<Store>((set, get) => ({
       viewingN: generation,
     });
   },
+  beginEvaluation: () => {
+    const run = get().run;
+    if (run) set({ run: { ...run, phase: "eval" } });
+  },
+  evaluationFailed: (error, level) => {
+    const run = get().run;
+    if (!run) return;
+    const next: SwarmRun = { ...run, evaluationError: error, evaluationErrorLevel: level,
+      generations: run.generations.map(g => g.n === run.generation ? { ...g, evaluationError: error, evaluationErrorLevel: level } : g) };
+    persistNow(next);
+    set({ run: next });
+  },
   applyEval: (evaluation) => {
     const run = get().run;
     if (!run) return;
     const generation = run.generation ?? 1;
     const generations = run.generations.map((g) =>
-      g.n === generation ? { ...g, evaluation } : g,
+      g.n === generation ? { ...g, evaluation, evaluationError: undefined, evaluationErrorLevel: undefined } : g,
     );
     const next: SwarmRun = {
       ...run,
       evaluation,
+      evaluationError: undefined,
+      evaluationErrorLevel: undefined,
       fixtureLevel: evaluation.level,
       generations,
       phase: "eval",

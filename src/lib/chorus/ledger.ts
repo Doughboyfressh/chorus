@@ -1,4 +1,4 @@
-import { comparableDiagnostics, type DiagnosticIdentity } from "./integrity.ts";
+import { boundedText, MAX_ARTIFACT, comparableDiagnostics, type DiagnosticIdentity } from "./integrity.ts";
 import type { JudgeVerdict, SwarmRun } from "./types";
 
 export function unique(items: string[]) {
@@ -49,7 +49,7 @@ export function sittingArtifact(run: SwarmRun | null | undefined): SittingArtifa
   };
 }
 
-export function formatArtifact(art: SittingArtifact, limit = 2400): string {
+export function formatArtifact(art: SittingArtifact): string {
   if (!art.current) return "";
   const score =
     typeof art.score === "number"
@@ -57,10 +57,10 @@ export function formatArtifact(art: SittingArtifact, limit = 2400): string {
       : "";
   const origin =
     art.origin && art.origin !== art.current
-      ? `Origin (gen 0):\n---\n${art.origin.slice(0, 1200)}\n---\n\n`
+      ? `Origin (gen 0):\n---\n${boundedText(art.origin, "original artifact", MAX_ARTIFACT, 1)}\n---\n\n`
       : "";
   const title = art.currentTitle ? ` (${art.currentTitle})` : "";
-  return `${origin}Current artifact${title}. Improve THIS. Do not start from a blank page.\n---\n${art.current.slice(0, limit)}\n---\n${score}`.trim();
+  return `${origin}Current artifact${title}. Improve THIS. Do not start from a blank page.\n---\n${boundedText(art.current, "current artifact", MAX_ARTIFACT, 1)}\n---\n${score}`.trim();
 }
 
 export function recurseTarget(run: SwarmRun): RecurseTarget {

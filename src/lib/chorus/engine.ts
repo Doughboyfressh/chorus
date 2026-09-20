@@ -1,3 +1,5 @@
+import { FindingsValidationError, FINDINGS_INSTRUCTIONS } from "./findings.ts";
+import { completeObject } from "./artifact-text.ts";
 import { boundedText, MAX_ARTIFACT, MAX_USER_TEST } from "./integrity.ts";
 import type { ChatFn } from "./completions";
 import { examFor, gradeArtifact } from "./grade.ts";
@@ -32,9 +34,9 @@ export async function conductSwarm(
   const dataGoal = clampGoal(goal);
   const baselineBlock =
     extra?.pasted?.trim() && extra.baseline
-      ? `\nThe user already has this artifact (fixture ${extra.baseline.score}/100, failing: ${extra.baseline.failed.join("; ") || "none"}). Improve THIS. Do not start from a blank page.\n---\n${extra.pasted.slice(0, 1800)}\n---`
+      ? `\nThe user already has this artifact (fixture ${extra.baseline.score}/100, failing: ${extra.baseline.failed.join("; ") || "none"}). Improve THIS. Do not start from a blank page.\n---\n${boundedText(extra.pasted, "artifact", MAX_ARTIFACT, 1)}\n---`
       : extra?.pasted?.trim()
-        ? `\nThe user already has this artifact. Improve THIS.\n---\n${extra.pasted.slice(0, 1800)}\n---`
+        ? `\nThe user already has this artifact. Improve THIS.\n---\n${boundedText(extra.pasted, "artifact", MAX_ARTIFACT, 1)}\n---`
         : "";
   const result = await chat({
     temperature: 0.4,
@@ -274,12 +276,12 @@ Return JSON:
   });
   if (!result.ok) return result;
   try {
-    const parsed = extractJson<Record<string, unknown>>(result.text);
+    const parsed = completeObject(result.text);
     const pattern = (parsed.pattern ?? {}) as Record<string, unknown>;
     return {
       ok: true,
       title: asString(parsed.title, "Swarm deliverable"),
-      deliverable: asString(parsed.deliverable, "The swarm did not produce a merge."),
+      deliverable: boundedText(parsed.deliverable, "artifact", MAX_ARTIFACT, 8),
       steps: asStringList(parsed.steps).slice(0, 6),
       watchouts: asStringList(parsed.watchouts).slice(0, 4),
       pattern: {
@@ -289,20 +291,8 @@ Return JSON:
         merge: asString(pattern.merge, "One owner writes the final artifact."),
       },
     };
-  } catch {
-    return {
-      ok: true,
-      title: "Draft merge",
-      deliverable: result.text.slice(0, 1800) || "The swarm did not produce a merge.",
-      steps: [],
-      watchouts: ["Synthesizer JSON was truncated. Treat this merge as a draft."],
-      pattern: {
-        contract: data.contract,
-        fanout: data.whyThisSplit,
-        critique: data.critique.verdict,
-        merge: "Fallback merge from unreadable JSON.",
-      },
-    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Synthesizer did not return a complete artifact." };
   }
 }
 
@@ -562,21 +552,13 @@ export async function evaluateArtifact(
       maxTokens: 700,
       timeoutMs: 45_000,
       system: `${data.title}\n${data.deliverable}` +
-        `\n\nReturn JSON only: { "findings": [{ "issue": "one line", "quote": "exact source line" }] }.`,
+        `\n\n${FINDINGS_INSTRUCTIONS}`,
       user: `${exam.task}\n\nEach finding must quote an exact line from the source. Do not paraphrase the line.\n\n${exam.input}`,
     });
     findings = executed.ok ? executed.text : undefined;
-    if (!executed.ok) {
-      const graded = gradeArtifact({
-        labId: data.labId,
-        title: data.title,
-        deliverable: data.deliverable,
-        userTest: data.userTest,
-        level,
-      });
-      return { ok: true, ...graded, evidence: `Practice execution failed (${executed.error}). No execution credit.` };
-    }
+    if (!executed.ok) return { ok: false, error: `Practice execution failed: ${executed.error}. No score was recorded.` };
   }
+  try {
   return {
     ok: true,
     ...gradeArtifact({
@@ -588,4 +570,8 @@ export async function evaluateArtifact(
       level,
     }),
   };
+  } catch (err) {
+    if (err instanceof FindingsValidationError) return { ok: false, error: err.message };
+    throw err;
+  }
 }

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { MAX_GENERATIONS } from "@/lib/chorus/labs";
 import { preferencePairs } from "@/lib/chorus/pairs";
-import { playbookMarkdown, downloadPairs, downloadTraining, recurseSwarm, recurseTarget } from "@/lib/chorus/run";
+import { playbookMarkdown, retryEvaluation, downloadPairs, downloadTraining, recurseSwarm, recurseTarget } from "@/lib/chorus/run";
 import { useChorus, viewedGeneration, baselineAsGeneration } from "@/lib/chorus/store";
 import { cn } from "@/lib/utils";
 import { ComparePlate } from "./compare-plate";
@@ -29,7 +29,9 @@ export function Synthesis() {
     viewingN === 0 && run ? baselineAsGeneration(run) : viewedGeneration(run, viewingN);
   const synthesis = snap?.synthesis ?? run?.synthesis;
   const delta = snap?.delta ?? run?.delta;
-  const evaluation = snap?.evaluation ?? run?.evaluation;
+  const evaluation = snap ? snap.evaluation : run?.evaluation;
+  const evaluationError = snap ? snap.evaluationError : run?.evaluationError;
+  const canRetry = run?.phase === "done" && (!snap || snap.n === run.generation);
   if (!synthesis && !delta && run?.phase !== "judge" && run?.phase !== "eval") return null;
 
   const generation = run?.generation ?? 1;
@@ -93,13 +95,22 @@ export function Synthesis() {
         All results, including legacy runs, are unverified. Clean training export is locked.
       </p>
 
+      {evaluationError ? (
+        <div role="alert" className="mb-4 rounded-xl bg-surface-2 p-4 text-sm text-danger">
+          <p>Evaluation not scored. Your artifact and history are preserved.</p>
+          <p className="mt-2">{evaluationError}</p>
+          <Button className="mt-3" variant="secondary" size="sm" onClick={() => retryEvaluation()} disabled={!canRetry}>
+            Retry evaluation only
+          </Button>
+        </div>
+      ) : null}
       {evaluation ? (
         <div className="mb-6 rounded-xl bg-surface-2 p-4">
           <p className="font-mono text-xs uppercase tracking-widest text-subtle">
             Public practice v{(evaluation.level ?? 0) + 1}
             {evaluation.mutated ? " · mutated" : ""} · gen {viewingN}
           </p>
-          <p className="mt-2 font-display text-2xl leading-tight text-fg">{evaluation.score}/100 · unverified</p>
+          <p className="mt-2 font-display text-2xl leading-tight text-fg">{evaluation.submissionStatus === "not_run" ? "Not run" : `${evaluation.score}/100 · unverified`}</p>
           <p className="mt-1 text-sm text-muted">{evaluation.fixture}</p>
           {evaluation.executor ? (
             <p className="mt-1 text-sm text-muted">

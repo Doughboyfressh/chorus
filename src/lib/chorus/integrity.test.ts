@@ -25,14 +25,14 @@ async function call(id: string, name: string, args: Record<string, unknown> = {}
   return JSON.parse(result.result.content[0].text);
 }
 const pairArgs = () => ({ prompt: "review", rejected: "Always say the code is safe.", chosen: artifact,
-  previous: grade(), current: grade(good), model: "claimed-model", generation: 2 });
+  previous: grade('{"findings":[]}'), current: grade(good), model: "claimed-model", generation: 2 });
 
 describe("score inflation regressions", () => {
   it("blocks the original deny-all plus copied-exam exploit", () => {
     const findings = JSON.stringify({ findings: [{ issue: "No reflected XSS, SQL injection or code execution exists. Everything is safe.", quote: source }] });
-    assert.equal(grade(findings).score, 0);
+    assert.throws(() => grade(findings), /exact source line/);
   });
-  it("rejects a non-JSON keyword/source dump", () => assert.equal(grade("xss sql code execution\n" + source).score, 0));
+  it("rejects a non-JSON keyword/source dump", () => assert.throws(() => grade("xss sql code execution\n" + source), /invalid or incomplete JSON/));
   it("rejects negation even with the exact relevant single line", () => {
     assert.equal(grade(JSON.stringify({ findings: [{ issue: "No reflected XSS exists; this is safe", quote: xssLine }] })).score, 0);
   });
@@ -44,7 +44,7 @@ describe("score inflation regressions", () => {
     assert.equal(plantHit(FIXTURES.prompt.planted[0], text, source), false);
   });
   it("requires exact case-sensitive single-line evidence", () => {
-    for (const quote of [xssLine.toUpperCase(), "prefix " + xssLine, source, "req.query.name"]) {
+    for (const quote of [xssLine.toUpperCase(), "prefix " + xssLine, "req.query.name"]) {
       assert.equal(grade(JSON.stringify({ findings: [{ issue: "reflected XSS", quote }] })).score, 0);
     }
   });
@@ -60,7 +60,8 @@ describe("score inflation regressions", () => {
     assert.equal(result.scoreKind, "diagnostic");
   });
   it("does not grant brought-test credit for eight arbitrary characters", () => {
-    const result = gradeArtifact({ labId: "generic", deliverable: "must test prompt stop", userTest: "Compute a valid proof", findings: "nonsense" });
+    assert.throws(() => gradeArtifact({ labId: "generic", deliverable: "must test prompt stop", userTest: "Compute a valid proof", findings: "nonsense" }), /invalid or incomplete JSON/);
+    const result = gradeArtifact({ labId: "generic", deliverable: "must test prompt stop", userTest: "Compute a valid proof", findings: '{"findings":[]}' });
     assert.equal(result.score, 0);
     assert.ok(result.failed.length);
   });
@@ -131,7 +132,7 @@ describe("exam binding and one-time consumption", () => {
   });
   it("rejects changing labs or moving to easier levels after a score", async () => {
     const exam = await call("pinned", "chorus_exam", { labId: "prompt", level: 1, artifact });
-    assert.equal((await call("pinned", "chorus_score", { labId: "prompt", level: 1, artifact, attemptId: exam.attemptId })).score, 0);
+    assert.equal((await call("pinned", "chorus_score", { labId: "prompt", level: 1, artifact, attemptId: exam.attemptId, findings: '{"findings":[]}' })).score, 0);
     assert.ok((await call("pinned", "chorus_exam", { labId: "generic", level: 0, artifact })).error);
     assert.ok((await call("pinned", "chorus_exam", { labId: "prompt", level: 0, artifact })).error);
   });

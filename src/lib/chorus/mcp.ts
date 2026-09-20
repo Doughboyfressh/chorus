@@ -1,7 +1,10 @@
-import { boundedText, cleanTrainingRows, MAX_ARTIFACT, MAX_FINDINGS } from "./integrity.ts";
+import { FindingsValidationError, validateFindings, FINDINGS_INSTRUCTIONS } from "./findings.ts";
+import { MAX_SEAT_TEXT } from "./artifact-text.ts";
+import { maxFixtureLevel } from "./fixtures.ts";
+import { boundedText, cleanTrainingRows, MAX_ARTIFACT } from "./integrity.ts";
 import { LABS } from "./labs.ts";
 import { examFor, gradeArtifact } from "./grade.ts";
-import { applySittingUpdate, dropSession, consumeExam, fillOrchestraSeat, markExam, nextOrchestraSeat, recordScore, resetSitting, sittingFor, sittingPairs, sittingSnapshot, sittingToRun } from "./mcp-sitting.ts";
+import { applySittingUpdate, dropSession, consumeExam, examReady, fillOrchestraSeat, markExam, nextOrchestraSeat, recordScore, resetSitting, sittingFor, sittingPairs, sittingSnapshot, sittingToRun, progressionFor } from "./mcp-sitting.ts";
 
 export const MCP_PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"] as const;
 
@@ -42,7 +45,11 @@ Otherwise a host sitting:
 1. chorus_labs — pick ONE lab. Stay on it.
 2. chorus_exam with the exact artifact first; preserve its attemptId for chorus_score. You are the artifact; exam.input is the user message. Then chorus_score with the findings that run produced. Scoring without exam is rejected.
 3. A later diagnostic can produce a contaminated review candidate only on the same test and changed text. It is not evidence of independent improvement. Clean training exports are unavailable.
-4. Generation 8: chorus_sitting with reset:true. Same MCP URL.
+4. A 100/100 pass with no failed checks automatically advances to the next available level WITHOUT wiping history. Omit level to use the current level; never invent levels beyond maxLevel.
+5. Diagnostic 0–100 scores and unverified review candidates are allowed. Only clean training exports are locked. A format error is not a zero; correct the format, do not change the findings to match the checker.
+6. At the generation cap, preserve the artifact and ledger. Reset only with the user's explicit permission, never to manufacture progress.
+
+${FINDINGS_INSTRUCTIONS}
 
 Do not ask for an API key. You are the model.`;
 
@@ -61,7 +68,7 @@ const TOOLS = [
       properties: {
         artifact: { type: "string", description: "Exact artifact to freeze for this attempt." },
         labId: { type: "string", description: "rsi | prompt | eval | stress | data | generic" },
-        level: { type: "number" },
+        level: { type: "integer", minimum: 0, description: "Omit to use the current level. Full passes advance automatically; no reset required." },
         userTest: { type: "string" },
       },
       required: ["artifact"],
@@ -77,12 +84,12 @@ const TOOLS = [
         labId: { type: "string" },
         artifact: { type: "string" },
         attemptId: { type: "string", description: "Unused attemptId returned by chorus_exam for this exact artifact and test." },
-        findings: { type: "string" },
-        level: { type: "number" },
+        findings: { type: "string", description: FINDINGS_INSTRUCTIONS },
+        level: { type: "integer", minimum: 0, description: "Omit to use the current level. Full passes advance automatically; no reset required." },
         userTest: { type: "string" },
         goal: { type: "string" },
         executor: { type: "string", description: "Claimed executor for display only. Never establishes independent execution." },
-        reset: { type: "boolean", description: "Wipe this sitting first (same MCP URL). Use when generation is 8." },
+        reset: { type: "boolean", description: "Deprecated here: score never resets. Use chorus_sitting reset only with explicit permission." },
       },
       required: ["artifact", "attemptId"],
     },
@@ -170,7 +177,7 @@ export async function handleMcp(body: unknown, ctx: McpCtx): Promise<unknown | n
       return ok(msg.id, {
         protocolVersion: protocol,
         capabilities: { tools: { listChanged: true }, prompts: {}, resources: {} },
-        serverInfo: { name: "chorus", version: "1.0.0" },
+        serverInfo: { name: "chorus", version: "2.1.0" },
         instructions: SITTING_PROMPT,
       });
     }
@@ -197,7 +204,7 @@ export async function handleMcp(body: unknown, ctx: McpCtx): Promise<unknown | n
       try {
         return ok(msg.id, await callTool(msg.params ?? {}, ctx));
       } catch (err) {
-        return ok(msg.id, textResult({ error: err instanceof Error ? err.message : "Request rejected" }, true));
+        return ok(msg.id, textResult(err instanceof FindingsValidationError ? err.toResult() : { error: err instanceof Error ? err.message : "Request rejected" }, true));
       }
     case "session/end":
       await dropSession(ctx.sessionId);
@@ -212,7 +219,7 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
   const args = (params.arguments ?? {}) as Record<string, unknown>;
   const sessionId = ctx.sessionId;
   if (name === "chorus_labs") {
-    return textResult(LABS.map((lab) => ({ id: lab.id, title: lab.title, blurb: lab.blurb, goal: lab.goal })));
+    return textResult(LABS.map((lab) => ({ id: lab.id, title: lab.title, blurb: lab.blurb, goal: lab.goal, maxLevel: maxFixtureLevel(lab.id) })));
   }
   if (name === "chorus_exam") {
     const sitting = await sittingFor(sessionId);
@@ -222,7 +229,7 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
     const userTest = args.userTest === undefined ? undefined : String(args.userTest);
     const exam = examFor(labId, level, userTest);
     const attempt = await markExam(sessionId, labId, level, artifact, userTest);
-    return textResult({ ...exam, ...attempt });
+    return textResult({ ...exam, ...attempt, progression: progressionFor(await sittingFor(sessionId)) });
   }
   if (name === "chorus_score") {
     if (args.reset === true) return textResult({ error: "Reset explicitly with chorus_sitting, then request a new chorus_exam." }, true);
@@ -231,19 +238,26 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
     const labId = args.labId === undefined ? current.labId : String(args.labId);
     const level = args.level === undefined ? current.level : args.level as number;
     const userTest = args.userTest === undefined ? undefined : String(args.userTest);
-    examFor(labId, level, userTest);
+    const exam = examFor(labId, level, userTest);
+    if (current.scores.length >= 8) return textResult({ error: "Generation cap reached. Preserve the ledger; reset only with explicit permission.", capped: true }, true);
+    if (typeof args.attemptId !== "string" || !examReady(current, labId, level, artifact, args.attemptId, userTest)) {
+      return textResult({ error: "chorus_exam first with this exact artifact and test. Supply its unused, unexpired attemptId." }, true);
+    }
+    // Validate and grade without side effects, then atomically consume exactly once.
+    if (exam.execute || args.findings !== undefined) validateFindings(args.findings);
+    const findings = args.findings as string | undefined;
+    const graded = gradeArtifact({ labId, deliverable: artifact, findings, userTest, level });
     if (typeof args.attemptId !== "string" || !await consumeExam(sessionId,
       { labId, level, artifact, userTest }, args.attemptId)) {
       return textResult({ error: "chorus_exam first with this exact artifact and test. Supply its unused, unexpired attemptId." }, true);
     }
-    const findings = args.findings === undefined ? undefined : boundedText(args.findings, "findings", MAX_FINDINGS);
-    const graded = gradeArtifact({ labId, deliverable: artifact, findings, userTest, level });
     const recorded = await recordScore(sessionId, artifact, graded,
       args.goal ? String(args.goal) : "", args.executor ? String(args.executor) : undefined);
     return textResult({
       ...recorded.graded, sittingId: recorded.sitting.id, pair: recorded.pair,
       pairCount: recorded.sitting.pairs.length, cleanPairCount: 0,
       generation: recorded.sitting.scores.length, capped: recorded.capped,
+      progression: progressionFor(recorded.sitting),
       exhausted: Boolean(graded.exhausted),
       nextLevel: graded.exhausted ? null : recorded.sitting.level,
       hint: recorded.capped ? "Generation cap 8. Reset explicitly to start a new sitting." :
@@ -257,7 +271,7 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
       labId: sitting.labId,
       generations: 0,
       pairCount: 0,
-      note: "Same MCP URL. Ledger wiped. Score a weak gen 0 first if you want pairs.",
+      note: "Same MCP URL. Explicit reset completed. Run real evaluations; never fabricate a weak baseline to obtain pairs.",
     });
   }
   if (name === "chorus_sitting") {
@@ -307,13 +321,15 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
     return textResult(run ?? { error: "No sitting yet. Call chorus_score." }, !run);
   }
   if (name === "chorus_next") {
-    return textResult(await nextOrchestraSeat(sessionId));
+    const result = await nextOrchestraSeat(sessionId);
+    return textResult(result, "error" in result);
   }
   if (name === "chorus_fill") {
     const text = String(args.text ?? "");
     if (text.trim().length < 8) return textResult({ error: "Paste the seat's completion." }, true);
-    boundedText(text, "completion", MAX_FINDINGS, 8);
-    return textResult(await fillOrchestraSeat(sessionId, String(args.seat ?? ""), text, typeof args.attemptId === "string" ? args.attemptId : undefined));
+    boundedText(text, "completion", MAX_SEAT_TEXT, 8);
+    const result = await fillOrchestraSeat(sessionId, String(args.seat ?? ""), text, typeof args.attemptId === "string" ? args.attemptId : undefined);
+    return textResult(result, "error" in result);
   }
   return textResult({ error: `Unknown tool ${name}` }, true);
 }

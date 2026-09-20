@@ -126,7 +126,7 @@ export function Composer() {
           />
           {baseline ? (
             <p className="text-sm text-muted">
-              Gen 0 practice {baseline.score}/100 · unverified
+              Gen 0 {baseline.submissionStatus === "not_run" ? "not run" : `practice ${baseline.score}/100 · unverified`}
               {baseline.failed.length ? ` · failing ${baseline.failed.join(" · ")}` : ""}.
             </p>
           ) : null}

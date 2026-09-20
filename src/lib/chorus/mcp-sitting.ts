@@ -1,3 +1,5 @@
+import { validateFindings } from "./findings.ts";
+import { maxFixtureLevel } from "./fixtures.ts";
 import { requireDurableDatabase } from "./durable-storage.ts";
 import { writeSnapshot } from "./snapshot-store.ts";
 import { validSitId } from "./mcp-url.ts";
@@ -147,8 +149,9 @@ export async function markExam(sessionId: string, labId: string, level: number, 
   const sitting = await sittingFor(sessionId, labId);
   examFor(labId, level, userTest); // Reject unknown labs and invalid levels before changing state.
   boundedText(artifact, "artifact", MAX_ARTIFACT, 8);
+  if (sitting.scores.length >= 8) throw new Error("Generation cap reached. Preserve the ledger; reset only with explicit permission.");
   if (sitting.scores.length && (sitting.labId !== labId || sitting.level !== level)) {
-    throw new Error("Lab and level are pinned. Reset explicitly to start a different test.");
+    throw new Error(`Lab is pinned to ${sitting.labId}; current level is ${sitting.level}. Omit level to use it. A full pass advances automatically without reset. Explicit reset is required only to change labs or restart at another level.`);
   }
   const binding = { labId, level, artifact, userTest };
   const attempt = await issueAttempt(sessionId, binding);
@@ -196,7 +199,7 @@ export async function recordScore(sessionId: string, artifact: string, graded: E
   const sitting = await sittingFor(sessionId, graded.labId);
   if (sitting.scores.length >= 8) return { sitting, pair: null, graded, capped: true as const };
   if (sitting.scores.length && (sitting.labId !== graded.labId || sitting.level !== graded.level)) {
-    throw new Error("Lab and level are pinned. Reset explicitly to start a different test.");
+    throw new Error(`Lab is pinned to ${sitting.labId}; current level is ${sitting.level}. Omit level to use it. A full pass advances automatically without reset. Explicit reset is required only to change labs or restart at another level.`);
   }
   if (executor?.trim()) sitting.executor = executor.trim().slice(0, 80);
   const evaluation = quarantine({ ...graded, executionContext: JSON.stringify(["mcp-host:unverified", sitting.executor || "mcp-host"]) });
@@ -322,6 +325,14 @@ export async function sittingToRun(sessionId: string): Promise<SwarmRun | null> 
   };
 }
 
+export function progressionFor(sitting: McpSitting) {
+  const last = sitting.scores.at(-1)?.evaluation;
+  return { currentLevel: sitting.level, lastScoredLevel: last?.level ?? null,
+    maxLevel: maxFixtureLevel(sitting.labId), capped: sitting.scores.length >= 8,
+    exhausted: Boolean(last?.exhausted),
+    policy: "A full diagnostic pass automatically advances one level without reset. Omit level on the next exam. Comparisons are within the same test only; clean training stays locked." };
+}
+
 export async function sittingSnapshot(sessionId: string) {
   const sitting = bySession.get(sessionId) ?? (await loadFromDb(sessionId));
   if (!sitting) return null;
@@ -329,6 +340,7 @@ export async function sittingSnapshot(sessionId: string) {
     id: sitting.id,
     labId: sitting.labId,
     level: sitting.level,
+    progression: progressionFor(sitting),
     generations: sitting.scores.length,
     currentScore: sitting.scores.at(-1)?.score ?? null,
     verified: false,
@@ -372,7 +384,7 @@ export async function applySittingUpdate(
   const sitting = await sittingFor(sessionId, args.labId || existing?.labId || "prompt");
   if (args.labId) sitting.labId = args.labId;
   if (args.executor?.trim()) sitting.executor = args.executor.trim().slice(0, 80);
-  if (args.contract?.trim()) sitting.contract = args.contract.trim().slice(0, 8000);
+  if (args.contract?.trim()) sitting.contract = boundedText(args.contract, "contract", MAX_ARTIFACT, 1);
   if (Array.isArray(args.specialists) && args.specialists.length) {
     sitting.specialists = args.specialists.slice(0, 3).map((row, i) => ({
       id: `s${i + 1}`,
@@ -383,10 +395,10 @@ export async function applySittingUpdate(
   if (args.specialist?.trim() && args.patch?.trim()) {
     sitting.patches = [
       ...(sitting.patches ?? []),
-      { specialist: args.specialist.trim().slice(0, 80), patch: args.patch.trim().slice(0, 8000) },
+      { specialist: args.specialist.trim().slice(0, 80), patch: boundedText(args.patch, "patch", MAX_ARTIFACT, 1) },
     ].slice(-12);
   }
-  if (args.merge?.trim()) sitting.merge = args.merge.trim().slice(0, 24_000);
+  if (args.merge?.trim()) sitting.merge = boundedText(args.merge, "artifact", MAX_ARTIFACT, 8);
   if (args.conduct) {
     sitting.orchestra = startOrchestraState({
       labId: sitting.labId,
@@ -415,16 +427,17 @@ export async function nextOrchestraSeat(sessionId: string) {
   }
   const seat = pendingSeat(sitting.orchestra);
   if (!seat) {
-    return { done: true, pairCount: sitting.pairs.length, generations: sitting.scores.length };
+    return { done: true, pairCount: sitting.pairs.length, cleanPairCount: 0, generations: sitting.scores.length, progression: progressionFor(sitting) };
   }
   if (seat === "exam") {
+    if (sitting.scores.length >= 8) return { error: "Generation cap reached. Existing artifact and ledger are preserved.", capped: true };
     const artifact = mergeDeliverable(sitting.orchestra) || sitting.current || "";
     let attempt = sitting.exam;
     if (!attempt || !examReady(sitting, sitting.labId, sitting.level, artifact, attempt.attemptId)) {
       await markExam(sessionId, sitting.labId, sitting.level, artifact);
       attempt = sitting.exam;
     }
-    return { done: false, ...seatPrompt(sitting.orchestra, seat), attemptId: attempt?.attemptId,
+    return { done: false, ...seatPrompt({ ...sitting.orchestra, labId: sitting.labId, level: sitting.level }, seat), attemptId: attempt?.attemptId,
       note: "Return this attemptId with chorus_fill. This is unverified practice, not an independent exam." };
   }
   return { done: false, ...seatPrompt(sitting.orchestra, seat) };
@@ -440,8 +453,12 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
   if (seat && seat !== pending) {
     return { error: `Fill ${pending} next.`, pending };
   }
+  let examGrade: EvalResult | undefined;
   if (pending === "exam") {
+    if (sitting.scores.length >= 8) return { error: "Generation cap reached. Existing artifact and ledger are preserved.", capped: true };
+    validateFindings(text); // BEFORE consuming the attempt or filling the seat.
     const artifact = mergeDeliverable(sitting.orchestra) || sitting.current || "";
+    examGrade = gradeArtifact({ labId: sitting.labId, deliverable: artifact, findings: text, level: sitting.level });
     if (!attemptId || !await consumeExam(sessionId, { labId: sitting.labId, level: sitting.level, artifact }, attemptId)) {
       return { error: "Request chorus_next and submit its unused attemptId for this exact artifact." };
     }
@@ -461,12 +478,7 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
   }
   if (pending === "exam") {
     const deliverable = mergeDeliverable(sitting.orchestra) || sitting.current || "";
-    const graded = gradeArtifact({
-      labId: sitting.labId,
-      deliverable,
-      findings: text,
-      level: sitting.level,
-    });
+    const graded = examGrade!;
     const recorded = await recordScore(
       sessionId,
       deliverable || text,
@@ -484,6 +496,8 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
       graded,
       pair: recorded.pair,
       generation: recorded.sitting.scores.length,
+      pairCount: recorded.sitting.pairs.length, cleanPairCount: 0,
+      progression: progressionFor(recorded.sitting),
     };
   }
   await saveToDb(sitting);

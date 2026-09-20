@@ -31,7 +31,7 @@ function GenColumn({ gen }: { gen: Generation }) {
       </h3>
       {typeof gen.evaluation?.score === "number" ? (
         <p className="mt-2 font-mono text-xs tabular-nums tracking-widest text-subtle">
-          Practice {gen.evaluation.score}/100 · unverified
+          {gen.evaluation.submissionStatus === "not_run" ? "Not run" : `Practice ${gen.evaluation.score}/100 · unverified`}
         </p>
       ) : null}
       <p className="mt-3 text-sm leading-relaxed text-muted">{excerpt(gen.contract || "No contract.")}</p>
