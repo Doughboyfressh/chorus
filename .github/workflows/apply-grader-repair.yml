@@ -5,6 +5,9 @@ on:
     paths: ['.maintenance/**', '.github/workflows/apply-grader-repair.yml']
 permissions:
   contents: write
+defaults:
+  run:
+    shell: bash
 concurrency:
   group: reviewed-grader-repair
   cancel-in-progress: true
@@ -21,17 +24,9 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - name: Preserve source for exact-byte verification
-        run: |
-          mkdir -p evidence
-          git archive --format=tar HEAD > staged-source.tar
-      - uses: actions/upload-artifact@v4
-        with:
-          name: grader-staged-${{ github.run_id }}
-          path: staged-source.tar
-          retention-days: 3
       - name: Check and apply reviewed patch
         run: |
+          mkdir -p evidence
           python3 - <<'PY'
           import base64, gzip, hashlib
           from pathlib import Path
@@ -52,6 +47,7 @@ jobs:
           PY
           git apply --check /tmp/grader.patch
           git apply /tmp/grader.patch
+          git restore --source=HEAD --staged --worktree .github/workflows/integrity.yml
           git diff --check
       - name: Update lock for exact test-only Express dependency
         run: |
@@ -73,8 +69,9 @@ jobs:
         run: |
           git config user.name 'Doughboyfressh'
           git config user.email 'Doughboyfressh@users.noreply.github.com'
-          rm .maintenance/grader-repair-*.b64 .github/workflows/apply-grader-repair.yml
-          git add src tests package.json package-lock.json SECURITY.md .github/workflows .maintenance
+          rm .maintenance/grader-repair-*.b64
+          git add src tests package.json package-lock.json SECURITY.md .maintenance
+          test -z "$(git diff --cached --name-only -- .github/workflows)"
           git commit -m 'fix: task-aware diagnostic grading, grounded fixtures and stable execution identity'
           git push origin HEAD:fix/task-aware-grading
           git rev-parse HEAD > evidence/verified-commit.txt
