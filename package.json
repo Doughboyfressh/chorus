@@ -16,10 +16,11 @@
     "preview:stop": "node scripts/preview.mjs stop",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/chorus/*.test.ts && npm run test:integrity:db",
+    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts src/lib/chorus/*.test.ts && npm run test:integrity:db && npm run test:fixtures",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test:integrity:db": "node --experimental-strip-types --test tests/chorus-storage.test.ts"
+    "test:integrity:db": "node --experimental-strip-types --test tests/chorus-storage.test.ts",
+    "test:fixtures": "node --experimental-strip-types --test tests/prompt-fixture.test.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
@@ -93,6 +94,7 @@
     "prettier": "^3.4.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.56.1",
-    "vite": "^8.2.0"
+    "vite": "^8.2.0",
+    "express": "5.2.1"
   }
 }

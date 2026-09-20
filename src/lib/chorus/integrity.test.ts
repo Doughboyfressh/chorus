@@ -233,10 +233,13 @@ describe("production storage and orchestra integrity", () => {
     await assert.rejects(applySittingUpdate(id, { labId: "generic" }), /explicit reset/);
     assert.equal((await sittingSnapshot(id))?.generations, 1);
   });
-  it("does not compare different claimed MCP executors", async () => {
+  it("does not compare different declared MCP execution configurations", async () => {
     const id = "changed-executor";
     await dropSession(id);
+    const { applySittingUpdate } = await import("./mcp-sitting.ts");
+    await applySittingUpdate(id, { executionConfig: { model: "runner-a" } });
     await recordScore(id, artifact, grade(), "", "runner-a");
+    await applySittingUpdate(id, { executionConfig: { model: "runner-b" } });
     const second = await recordScore(id, artifact + " Check more deeply.", grade(good), "", "runner-b");
     assert.equal(second.pair, null);
   });

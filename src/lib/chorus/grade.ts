@@ -1,9 +1,10 @@
-import { boundedText, INTEGRITY_VERSION, MAX_ARTIFACT, MAX_USER_TEST, quarantine } from "./integrity.ts";
+import { boundedText, INTEGRITY_VERSION, GRADER_VERSION, MAX_ARTIFACT, MAX_USER_TEST, quarantine } from "./integrity.ts";
 import {
   applyUserTest,
   combineFixtureScore,
   maxFixtureLevel,
-  plantHit,
+  assessPlant,
+  type CheckAssessment,
   resolveFixture,
   scoreChecks,
 } from "./fixtures.ts";
@@ -18,6 +19,7 @@ export function examFor(labId?: string, level = 0, userTest?: string) {
     title: fixture.title,
     blurb: "Public practice exercise, not a private holdout.",
     verification: "unverified",
+    graderVersion: GRADER_VERSION,
     task: fixture.task,
     input: fixture.input,
     execute: fixture.execute,
@@ -50,6 +52,7 @@ export function gradeArtifact(args: {
   const artifact = `${args.title ?? ""}\n${args.deliverable}`;
   const structural = scoreChecks(artifact, fixture.checks);
   let plantedPassed: string[] = [];
+  const checkResults: CheckAssessment[] = [];
   let plantedFailed: string[] = [];
   let evidence = "Diagnostic checklist only; no execution was verified.";
   const shouldRun = fixture.execute && (fixture.planted.length > 0 || fixture.input.trim().length > 0);
@@ -59,7 +62,9 @@ export function gradeArtifact(args: {
     evidence = findings.slice(0, 500);
     if (fixture.planted.length > 0) {
       for (const plant of fixture.planted) {
-        if (plantHit(plant, findings, fixture.input)) plantedPassed.push(plant.label);
+        const check = assessPlant(plant, findings, fixture.input);
+        checkResults.push(check);
+        if (check.passed) plantedPassed.push(plant.label);
         else plantedFailed.push(plant.label);
       }
     } else {
@@ -91,15 +96,17 @@ export function gradeArtifact(args: {
   const plateFailed = shouldRun && (plantedPassed.length + plantedFailed.length) > 0 ? plantedFailed : structural.failed;
   const plantsOpen = shouldRun && plantedFailed.length > 0;
   const quoteHint = plantsOpen
-    ? "Findings need {issue, quote}. quote must copy a verbatim line from exam.input — not a line from your spec."
+    ? checkResults.filter(check => !check.passed).map(check => `${check.label}: ${check.detail}`).join(" ") || "Submit real findings with an exact relevant input line; missing evidence is not a format error."
     : shouldRun && !findings
       ? "Host must run the exam, then chorus_score with findings that quote exam.input."
       : undefined;
 
   return quarantine({
     integrityVersion: INTEGRITY_VERSION,
+    graderVersion: GRADER_VERSION,
+    checkResults,
     // Exact, public test identity for diagnostic comparisons; this is NOT a signature.
-    testKey: JSON.stringify([INTEGRITY_VERSION, fixture.labId, level, fixture.task, fixture.input]),
+    testKey: JSON.stringify([INTEGRITY_VERSION, GRADER_VERSION, fixture.labId, level, fixture.task, fixture.input]),
     executionContext: "unverified-submission",
     labId: fixture.labId,
     fixture: fixture.title,

@@ -36,17 +36,17 @@ function assertLive() {
   if (isCancelled()) throw new Error("Cancelled.");
 }
 
-async function evalChat(args: Parameters<typeof chatFromSlot>[1]) {
+function evaluationRunner() {
   const state = useChorus.getState();
   const resolved = resolveExecutor(state.slot, state.executor, state.hostedAvailable);
-  return chatFromSlot(resolved.slot, args);
-}
-
-function stampEval<T extends { score: number; failed: string[] }>(result: T): T & { contaminated: boolean; executor: string } {
-  const state = useChorus.getState();
-  const resolved = resolveExecutor(state.slot, state.executor, state.hostedAvailable);
-  return quarantine({ ...result, executor: resolved.label,
-    executionContext: JSON.stringify(["unverified-client", resolved.slot.kind, resolved.slot.baseUrl, resolved.slot.model, 0.1, 700]) });
+  const slot = { ...resolved.slot };
+  const label = resolved.label;
+  const context = JSON.stringify(["unverified-client", slot.kind, slot.baseUrl, slot.model, 0.1, 700]);
+  return {
+    chat: (args: Parameters<typeof chatFromSlot>[1]) => chatFromSlot(slot, args),
+    stamp: <T extends { score: number; failed: string[] }>(result: T) =>
+      quarantine({ ...result, executor: label, executionContext: context }),
+  };
 }
 
 async function runFanoutAndMerge(
@@ -183,6 +183,7 @@ export async function retryEvaluation() {
 }
 
 async function scoreAtLevel(run: SwarmRun, level: number, mutated = false) {
+  const runner = evaluationRunner();
   const result = await evaluateArtifact(
     {
       labId: run.labId,
@@ -192,14 +193,14 @@ async function scoreAtLevel(run: SwarmRun, level: number, mutated = false) {
       level,
       userTest: run.userTest,
     },
-    evalChat,
+    runner.chat,
   );
   if (!result.ok) {
     useChorus.getState().evaluationFailed(`Level ${level} was not scored: ${result.error}`, level);
     toast.error("Artifact preserved. Evaluation failed; no zero score was recorded.");
     return null;
   }
-  const stamped = stampEval({ ...result, mutated, level });
+  const stamped = runner.stamp({ ...result, mutated, level });
   useChorus.getState().applyEval(stamped);
   return stamped;
 }
@@ -340,6 +341,7 @@ export async function scoreBaseline() {
   }
   beginWork();
   try {
+    const runner = evaluationRunner();
     const result = await evaluateArtifact(
       {
         labId: state.labId,
@@ -349,10 +351,10 @@ export async function scoreBaseline() {
         level: 0,
         userTest: state.userTest,
       },
-      evalChat,
+      runner.chat,
     );
     if (!result.ok) throw new Error(result.error);
-    useChorus.getState().setBaseline(stampEval(result));
+    useChorus.getState().setBaseline(runner.stamp(result));
     toast.message(`Gen 0: ${result.score}/100 on the fixture.`);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Could not score the paste.";

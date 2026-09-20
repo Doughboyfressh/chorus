@@ -102,6 +102,8 @@ export type JudgeResult = {
 };
 
 export type EvalResult = {
+  graderVersion?: number;
+  checkResults?: { id: string; label: string; passed: boolean; reason: string; detail: string }[];
   integrityVersion?: number;
   testKey?: string;
   executionContext?: string;

@@ -1,3 +1,4 @@
+import { executionProfile, profileKey, sessionExecutionContext, type ExecutionProfile } from "./execution-profile.ts";
 import { validateFindings } from "./findings.ts";
 import { maxFixtureLevel } from "./fixtures.ts";
 import { requireDurableDatabase } from "./durable-storage.ts";
@@ -5,7 +6,7 @@ import { writeSnapshot } from "./snapshot-store.ts";
 import { validSitId } from "./mcp-url.ts";
 import { gradeArtifact } from "./grade.ts";
 import { diagnosticPair, type PreferencePair } from "./pairs.ts";
-import { boundedText, INTEGRITY_NOTE, MAX_ARTIFACT, quarantine } from "./integrity.ts";
+import { boundedText, GRADER_VERSION, INTEGRITY_NOTE, MAX_ARTIFACT, quarantine } from "./integrity.ts";
 import { issueAttempt, consumeAttempt, invalidateAttempts, type ExamBinding } from "./attempts.ts";
 import { examFor } from "./grade.ts";
 import type { Agent, EvalResult, Generation, SwarmRun } from "./types.ts";
@@ -29,6 +30,8 @@ export type McpSitting = {
   artifact0?: string;
   current?: string;
   executor?: string;
+  executionId?: string;
+  executionConfig?: ExecutionProfile;
   contract?: string;
   specialists?: { id: string; name: string; mandate: string }[];
   patches?: { specialist: string; patch: string }[];
@@ -145,7 +148,21 @@ export async function assertWriter(sessionId: string, writeKey?: string) {
   };
 }
 
-export async function markExam(sessionId: string, labId: string, level: number, artifact: string, userTest?: string) {
+function contextFor(sitting: McpSitting) {
+  sitting.executionId ??= crypto.randomUUID();
+  return sessionExecutionContext(sitting.executionId, sitting.executionConfig);
+}
+
+async function configureExecution(sitting: McpSitting, value: unknown) {
+  const profile = executionProfile(value);
+  if (profileKey(sitting.executionConfig) !== profileKey(profile)) {
+    await invalidateAttempts(sitting.id);
+    delete sitting.exam;
+    sitting.executionConfig = profile;
+  }
+}
+
+export async function markExam(sessionId: string, labId: string, level: number, artifact: string, userTest?: string, executionConfig?: unknown) {
   const sitting = await sittingFor(sessionId, labId);
   examFor(labId, level, userTest); // Reject unknown labs and invalid levels before changing state.
   boundedText(artifact, "artifact", MAX_ARTIFACT, 8);
@@ -153,19 +170,21 @@ export async function markExam(sessionId: string, labId: string, level: number, 
   if (sitting.scores.length && (sitting.labId !== labId || sitting.level !== level)) {
     throw new Error(`Lab is pinned to ${sitting.labId}; current level is ${sitting.level}. Omit level to use it. A full pass advances automatically without reset. Explicit reset is required only to change labs or restart at another level.`);
   }
-  const binding = { labId, level, artifact, userTest };
+  if (executionConfig !== undefined) await configureExecution(sitting, executionConfig);
+  const binding = { labId, level, artifact, userTest, graderVersion: GRADER_VERSION, executionContext: contextFor(sitting) };
   const attempt = await issueAttempt(sessionId, binding);
   sitting.labId = labId;
   sitting.level = level;
   sitting.exam = { ...binding, ...attempt };
   await saveToDb(sitting);
-  return attempt;
+  return { ...attempt, graderVersion: GRADER_VERSION, executionContext: binding.executionContext };
 }
 
-export function examReady(sitting: Pick<McpSitting, "exam">, labId: string, level: number,
+export function examReady(sitting: Pick<McpSitting, "exam" | "executionId" | "executionConfig">, labId: string, level: number,
   artifact: string, attemptId: string, userTest?: string) {
   const exam = sitting.exam;
-  return Boolean(exam && exam.attemptId === attemptId && exam.expiresAt > Date.now() &&
+  return Boolean(exam && exam.graderVersion === GRADER_VERSION && sitting.executionId &&
+    exam.executionContext === sessionExecutionContext(sitting.executionId, sitting.executionConfig) && exam.attemptId === attemptId && exam.expiresAt > Date.now() &&
     exam.labId === labId && exam.level === level && exam.artifact === artifact &&
     (exam.userTest ?? "") === (userTest ?? ""));
 }
@@ -173,7 +192,7 @@ export function examReady(sitting: Pick<McpSitting, "exam">, labId: string, leve
 export async function consumeExam(sessionId: string, binding: ExamBinding, attemptId: string) {
   const current = await sittingFor(sessionId);
   if (!examReady(current, binding.labId, binding.level, binding.artifact, attemptId, binding.userTest)) return false;
-  if (!await consumeAttempt(sessionId, attemptId, binding)) return false;
+  if (!await consumeAttempt(sessionId, attemptId, { ...binding, graderVersion: GRADER_VERSION, executionContext: current.exam!.executionContext })) return false;
   delete current.exam;
   await saveToDb(current);
   return true;
@@ -194,15 +213,16 @@ export function writerRanExam(_executor?: string) {
   return true;
 }
 
-export async function recordScore(sessionId: string, artifact: string, graded: EvalResult, goal = "", executor?: string) {
+export async function recordScore(sessionId: string, artifact: string, graded: EvalResult, goal = "", executor?: string, expectedContext?: string) {
   boundedText(artifact, "artifact", MAX_ARTIFACT, 8);
   const sitting = await sittingFor(sessionId, graded.labId);
   if (sitting.scores.length >= 8) return { sitting, pair: null, graded, capped: true as const };
   if (sitting.scores.length && (sitting.labId !== graded.labId || sitting.level !== graded.level)) {
     throw new Error(`Lab is pinned to ${sitting.labId}; current level is ${sitting.level}. Omit level to use it. A full pass advances automatically without reset. Explicit reset is required only to change labs or restart at another level.`);
   }
+  if (expectedContext !== undefined && expectedContext !== contextFor(sitting)) throw new Error("Execution configuration changed; no score was recorded. Request a new exam.");
   if (executor?.trim()) sitting.executor = executor.trim().slice(0, 80);
-  const evaluation = quarantine({ ...graded, executionContext: JSON.stringify(["mcp-host:unverified", sitting.executor || "mcp-host"]) });
+  const evaluation = quarantine({ ...graded, executionContext: contextFor(sitting), executor: sitting.executor || "mcp-host" });
   const prev = sitting.scores.at(-1);
   const pair = prev ? diagnosticPair({
     prompt: (goal || sitting.labId).slice(0, 800), rejected: prev.artifact, chosen: artifact,
@@ -349,6 +369,9 @@ export async function sittingSnapshot(sessionId: string) {
     failed: sitting.scores.at(-1)?.failed ?? [],
     pairCount: sitting.pairs.length,
     executor: sitting.executor ?? null,
+    executionConfig: sitting.executionConfig ?? null,
+    executionContext: sitting.executionId ? contextFor(sitting) : null,
+    graderVersion: GRADER_VERSION,
     specialists: (sitting.specialists ?? []).map((row) => row.name),
     contract: Boolean(sitting.contract),
     patches: sitting.patches?.length ?? 0,
@@ -369,6 +392,7 @@ export async function applySittingUpdate(
     patch?: string;
     merge?: string;
     executor?: string;
+    executionConfig?: unknown;
     conduct?: boolean;
     goal?: string;
     pasted?: string;
@@ -383,6 +407,7 @@ export async function applySittingUpdate(
   }
   const sitting = await sittingFor(sessionId, args.labId || existing?.labId || "prompt");
   if (args.labId) sitting.labId = args.labId;
+  if (args.executionConfig !== undefined) await configureExecution(sitting, args.executionConfig);
   if (args.executor?.trim()) sitting.executor = args.executor.trim().slice(0, 80);
   if (args.contract?.trim()) sitting.contract = boundedText(args.contract, "contract", MAX_ARTIFACT, 1);
   if (Array.isArray(args.specialists) && args.specialists.length) {
@@ -454,10 +479,12 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
     return { error: `Fill ${pending} next.`, pending };
   }
   let examGrade: EvalResult | undefined;
+  let boundExecutionContext: string | undefined;
   if (pending === "exam") {
     if (sitting.scores.length >= 8) return { error: "Generation cap reached. Existing artifact and ledger are preserved.", capped: true };
     validateFindings(text); // BEFORE consuming the attempt or filling the seat.
     const artifact = mergeDeliverable(sitting.orchestra) || sitting.current || "";
+    boundExecutionContext = sitting.exam?.executionContext;
     examGrade = gradeArtifact({ labId: sitting.labId, deliverable: artifact, findings: text, level: sitting.level });
     if (!attemptId || !await consumeExam(sessionId, { labId: sitting.labId, level: sitting.level, artifact }, attemptId)) {
       return { error: "Request chorus_next and submit its unused attemptId for this exact artifact." };
@@ -485,6 +512,7 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
       graded,
       sitting.orchestra.goal,
       sitting.executor,
+      boundExecutionContext,
     );
     recorded.sitting.orchestra = sitting.orchestra;
     await saveToDb(recorded.sitting);

@@ -26,8 +26,8 @@ async function good(endpoint, name, args = {}) {
   const result = await call(endpoint, name, args); assert.equal(result.failed, false, result.data.error); return result.data;
 }
 function findings(exam, partial = false) {
-  const rows = [ ['renamed a variable', 'replace the artifact text with a concrete patch'],
-    ['renamed a variable', 'assert a numeric improvement threshold of 0.85'],
+  const rows = [ ['No mutation operator.', 'Replace the failed artifact instruction with a causal patch and test the changed behavior'],
+    ['No numeric kill.', 'Reject if score < 0.85 or critical violations >=1'],
     ['renamed getUser', 'Reject rename-only changes with an unchanged score'],
     ['No test file.', 'Require a failing test with an assert for the correct failure reason'],
     ['stall, stall', 'halt after two stalls'] ];
@@ -40,7 +40,7 @@ try {
   assert.equal((await fetch(base, { signal: AbortSignal.timeout(20000) })).status, 200);
   const direct = context();
   const init = await rpc(direct, 'initialize', { protocolVersion: '2025-03-26' });
-  assert.equal(init.serverInfo.version, '2.1.0'); pass('New server version and live page');
+  assert.equal(init.serverInfo.version, '2.2.0'); pass('New server version and live page');
   const a = 'Review the agent and require concrete changes.';
   let exam = await good(direct, 'chorus_exam', { labId: 'rsi', artifact: a });
   const invalid = await call(direct, 'chorus_score', { artifact: a, attemptId: exam.attemptId, findings: '{"findings":["old schema"]}' });

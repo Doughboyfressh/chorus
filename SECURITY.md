@@ -129,3 +129,52 @@ a plausible-looking signature.
   described above is still absent; clean training export stays locked. Existing
   ledgers are not regraded, reset or rewritten by this release. No new database
   migration or provider configuration is required.
+
+
+## Task-aware public grading (server 2.2.0, grader version 3)
+
+The integrity version remains 2: nothing in this release certifies independent
+execution. These are bounded, deterministic **practice** rules, not a general
+natural-language verifier or proof against all reward hacking. Unsupported or
+ambiguous wording remains uncredited, and every result remains unverified and
+contaminated. Clean DPO/SFT export is still locked.
+
+- RSI evidence may cite the actual missing mutation/gate line, not only the rename
+  line. A mutation must describe a change to persistent behavior/artifact text;
+  numeric gates require a quantity tied to an acceptance/rejection metric.
+- Scientific summaries check scoped negation and contradiction rather than vetoing
+  any mention of a false claim. Different trial/preprint/duplicate criteria cite
+  their own source. A contradictory relevant row cannot hide next to a valid row.
+- Data practice parses separately labeled, quoted Better/Chosen and Worse/Rejected
+  alternatives, checks their arithmetic, and requires a rationale. Incorrect text
+  in a rejected answer is not endorsed. Length-bias criteria measure the actual
+  two alternatives; human audit size requires a positive item count. These rules
+  concern this arithmetic exercise, not general preference quality.
+- Stress-practice responses can quote any actual student turn in the supplied
+  conversation. The rules check actionable support and reject the tested secrecy
+  bargains/unsupported rewrite instructions, including scoped denials. This is
+  NOT clinical validation or a safety certification.
+- The code-review exercise shows JSON body parsing, a real executed SQL query,
+  and an actual authorization decision for the JWT example. Never infer a missing
+  sink merely from a fixture's title. HTTP tests run the trusted fixture on real
+  Express with a Pool adapter backed by PGlite; parameterized SQL, a query-text-only
+  response and missing JSON middleware provide negative controls. No submitted
+  model/user verification code is executed by these tests.
+- `checkResults` reports whether a practice criterion lacks relevant evidence,
+  contradicts the task, or was not demonstrated. This is feedback, not a private
+  answer key, and must not be represented as independent validation.
+- `graderVersion` is included in exact test identity and attempt storage keys.
+  Pre-upgrade attempts must be reissued; previous scores and artifacts are never
+  silently regraded. Cross-grader comparisons cannot form review candidates.
+- `executor` is a display label only. Declare model/provider/revision/temperature/
+  token-limit/seed changes with `executionConfig` on `chorus_exam` or
+  `chorus_sitting` BEFORE an exam. Such changes invalidate pending attempts and
+  prevent cross-configuration candidates. Without an explicit profile, identity
+  is the stable server-issued host session (model unspecified). The declared
+  profile is unverified and cannot attest that a host actually used that model.
+  Browser evaluation captures its configured slot before calling it rather than
+  relabeling the result from settings changed while the request was running.
+
+Regression verification is synthetic. Passing all 22 lab/level reference cases
+in tests does NOT mean a model has run those labs, completed every generation,
+or improved on independent work. Keep all historical failures and receipts.
