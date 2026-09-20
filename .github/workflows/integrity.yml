@@ -26,6 +26,8 @@ jobs:
         run: node --experimental-strip-types --test src/lib/chorus/*.test.ts
       - name: Atomic PostgreSQL attempt and history tests
         run: npm run test:integrity:db
+      - name: Saved experiments, receipts and budget enforcement
+        run: node --experimental-strip-types --test tests/experiments-storage.test.ts
       - name: Executable positive and negative security fixture controls
         run: npm run test:fixtures
       - name: Build and generate router types
