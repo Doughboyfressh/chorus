@@ -1,0 +1,64 @@
+name: Saved experiments browser
+on:
+  push:
+    branches: [feat/saved-experiments]
+    paths: [.github/workflows/experiments-browser.yml, tests/experiments-browser.mjs]
+  pull_request:
+    paths: ['src/components/chorus/experiments.tsx', 'src/lib/chorus/experiments/**', 'tests/experiments-browser.mjs', '.github/workflows/experiments-browser.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: chorus_test
+          POSTGRES_USER: chorus_test
+          POSTGRES_PASSWORD: disposable_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chorus_test -d chorus_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://chorus_test:disposable_ci_only@127.0.0.1:5432/chorus_test
+      CHORUS_BROWSER_BASE: http://127.0.0.1:8081
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: mkdir -p evidence && npm ci --ignore-scripts --no-audit --no-fund
+      - name: Apply production migrations to disposable PostgreSQL
+        run: npm run db:migrate 2>&1 | tee evidence/migrations.log
+      - name: Build application
+        run: npm run build:dev 2>&1 | tee evidence/build.log
+      - name: Start built application without development HMR
+        run: |
+          npm run preview > evidence/server.log 2>&1 &
+          for i in {1..40}; do if curl -sf http://127.0.0.1:8081/experiments >/dev/null; then break; fi; sleep 1; done
+          curl -sf http://127.0.0.1:8081/experiments >/dev/null
+      - name: Install browser for the locked test dependency
+        run: npx playwright install --with-deps chromium
+      - name: Test persistence, cross-device recovery and client run controls
+        run: |
+          node --experimental-strip-types tests/experiments-browser.mjs 2>&1 | tee evidence/browser.log
+          test -s evidence/browser-summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: experiments-browser-${{ github.run_id }}
+          path: evidence
+          retention-days: 7

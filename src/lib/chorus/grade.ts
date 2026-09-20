@@ -59,7 +59,7 @@ export function gradeArtifact(args: {
   const findings = args.findings?.trim() ?? "";
 
   if (shouldRun && findings) {
-    evidence = findings.slice(0, 500);
+    evidence = findings; // Preserve the complete submitted output; this remains host-supplied evidence.
     if (fixture.planted.length > 0) {
       for (const plant of fixture.planted) {
         const check = assessPlant(plant, findings, fixture.input);

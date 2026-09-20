@@ -111,6 +111,7 @@ export function ChorusApp() {
             ) : null}
             <section className="rounded-3xl bg-surface p-5 shadow-[var(--shadow-border)]">
               <Composer />
+              <Link to="/experiments" className="mt-4 block min-h-11 rounded-xl border border-border p-3 text-sm text-fg">Save this sitting · Experiments</Link>
             </section>
             <section className="rounded-3xl bg-surface p-5 shadow-[var(--shadow-border)]">
               <ModelSlotPanel />

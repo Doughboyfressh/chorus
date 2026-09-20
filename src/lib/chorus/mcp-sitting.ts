@@ -52,7 +52,7 @@ export type McpSitting = {
 };
 
 const MAX = 80;
-const MAX_PAYLOAD = 400_000;
+const MAX_PAYLOAD = 2_000_000;
 const bySession = new Map<string, McpSitting>();
 
 export { validSitId };
@@ -74,7 +74,7 @@ async function loadFromDb(id: string): Promise<McpSitting | null> {
   try {
     const rows = await sql<{ payload: string; revision: number }>`
       select payload, revision from chorus_mcp_sittings
-      where id = ${id} and updated_at > now() - interval '14 days'
+      where id = ${id} and (updated_at > now() - interval '14 days' or exists (select 1 from chorus_saved_sittings where sitting_id = ${id}))
       limit 1
     `;
     const raw = rows[0]?.payload;
@@ -96,11 +96,13 @@ async function saveToDb(sitting: McpSitting) {
   if (!sql) return;
   try {
     sitting.revision = await writeSnapshot(sql, sitting.id, payload, sitting.revision ?? 0);
-    await sql`delete from chorus_mcp_sittings where updated_at < now() - interval '14 days'`;
+    await sql`delete from chorus_mcp_sittings where updated_at < now() - interval '14 days'
+      and not exists (select 1 from chorus_saved_sittings where sitting_id = chorus_mcp_sittings.id)`;
     await sql`
       delete from chorus_mcp_sittings
       where id in (
         select id from chorus_mcp_sittings
+        where not exists (select 1 from chorus_saved_sittings where sitting_id = chorus_mcp_sittings.id)
         order by updated_at desc
         offset 500
       )

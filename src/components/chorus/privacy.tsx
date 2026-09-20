@@ -25,13 +25,27 @@ export function PrivacyPage() {
           </p>
           <p>
             A local server (llama.cpp, vLLM, Ollama) never sends the artifact through us. MCP
-            sends the artifact and findings so we can grade. That sitting is stored for 14 days,
+            sends the artifact and findings so we can grade. Unsaved sittings are temporary and normally retained for 14 days,
             keyed by the secret in the MCP URL. Anyone with the URL can read and score it.
-            Wipe clears the ledger. New URL rotates the secret and revokes the old one.
+            Wipe clears the live ledger. New URL creates a different sitting; it does not revoke the previous URL. Saved checkpoints are separate and survive live-ledger resets.
           </p>
           <p>
-            The pairs you export are yours. Chorus does not train on them. The Train download is a
-            pack for your trainer, not a weight update inside this product.
+            The pairs you export are yours. Chorus does not train on them. Public practice results are unverified; clean training exports remain disabled.
+          </p>
+          <p>
+            Saved experiment vaults use private recovery keys, stored only as hashes on the server.
+            This browser remembers its recovery key until you lock it. Saved artifacts, checkpoints
+            and controlled-run receipts have no automatic expiry. You can export them or explicitly
+            delete a saved leaf experiment. Possession of a recovery key grants access to that vault;
+            it is capability-based access, not user-account authentication.
+          </p>
+          <p>
+            Controlled Prompt comparisons send the two chosen artifacts and public calibration cases
+            to the operator-configured OpenAI endpoint. Full bounded responses, usage and errors are
+            stored as receipts. Provider credentials stay server-side; the separate operator execution
+            key stays in this tab's memory and is not saved with records. No paid execution starts
+            until you explicitly authorize a frozen plan. These small public tests do not certify
+            generalization, security or model improvement.
           </p>
         </div>
         <p className="mt-10">
