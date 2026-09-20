@@ -2,7 +2,7 @@ name: Verify saved experiments
 on:
   push:
     branches: [feat/saved-experiments]
-    paths: [.github/workflows/apply-experiments.yml, '.maintenance/experiments*', .maintenance/finalize-experiments.py]
+    paths: [.github/workflows/apply-experiments.yml, '.maintenance/experiments*', .maintenance/finalize-experiments.py, .maintenance/finish-experiments.py]
   workflow_dispatch:
 permissions:
   contents: write
@@ -52,6 +52,7 @@ jobs:
           git apply --check /tmp/experiments.patch
           git apply /tmp/experiments.patch
           python3 .maintenance/finalize-experiments.py
+          python3 .maintenance/finish-experiments.py
           git diff --check
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund 2>&1 | tee evidence/install.log
@@ -73,7 +74,7 @@ jobs:
         run: |
           git config user.name 'Doughboyfressh'
           git config user.email 'Doughboyfressh@users.noreply.github.com'
-          rm .maintenance/experiments-*.b64 .maintenance/finalize-experiments.py
+          rm .maintenance/experiments-*.b64 .maintenance/finalize-experiments.py .maintenance/finish-experiments.py
           git add src tests migrations package.json vite.config.ts EXPERIMENTS.md SECURITY.md .maintenance
           git commit -m 'feat: durable experiments and budgeted Prompt comparison receipts'
           git push origin HEAD:feat/saved-experiments
