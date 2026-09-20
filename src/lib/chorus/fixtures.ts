@@ -400,7 +400,7 @@ app.post("/login", (req, res) => {
       planted: [
         {
           id: "faithful2", rule: "small-trial", quote: ["Abstract 2:"],
-          label: "Did not repeat 'clearly works'",
+          label: "Preserved the small trial's uncertainty",
           anyOf: ["12", "p=0.61", "not significant"],
           noneOf: ["clearly works", "the drug works"],
         },

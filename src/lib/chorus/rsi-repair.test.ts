@@ -34,7 +34,7 @@ async function fillToExam(id: string, deliverable: string) {
     assert.equal(next.isError, false, JSON.stringify(next.value));
     if (next.value.seat === "exam") return next.value;
     const text = next.value.seat === "synthesizer" ? JSON.stringify({ title: "Full contract", deliverable }) :
-      next.value.seat === "conductor" || next.value.seat === "improver" ? JSON.stringify({ contract: "Preserve the complete contract and every constraint.", specialists: [] }) :
+      next.value.seat === "conductor" || next.value.seat === "improver" ? JSON.stringify({ contract: "Preserve the complete contract and every constraint.", specialists: [1, 2, 3].map(i => ({ id: `s${i}`, name: `Role ${i}`, mandate: `Preserve constraint ${i}.`, lens: "Evidence" })) }) :
       "Complete this role without inventing execution evidence.";
     const filled = await rpc(id, "chorus_fill", { seat: next.value.seat, text });
     assert.equal(filled.isError, false, JSON.stringify(filled.value));

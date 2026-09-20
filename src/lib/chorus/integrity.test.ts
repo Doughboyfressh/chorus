@@ -251,7 +251,7 @@ describe("production storage and orchestra integrity", () => {
     for (const seat of ["conductor", "s1", "s2", "s3", "critic", "synthesizer"]) {
       const next = await nextOrchestraSeat(id);
       assert.equal("seat" in next ? next.seat : undefined, seat);
-      const text = seat === "synthesizer" ? JSON.stringify({ title: "Review", deliverable: artifact }) : "Complete this practice role with care.";
+      const text = seat === "synthesizer" ? JSON.stringify({ title: "Review", deliverable: artifact }) : seat === "conductor" ? JSON.stringify({ contract: "Complete this practice role with care.", specialists: [1,2,3].map(i => ({ id: `s${i}`, name: `Role ${i}`, mandate: "Preserve evidence." })) }) : "Complete this practice role with care.";
       assert.ok("filled" in await fillOrchestraSeat(id, seat, text));
     }
     const exam = await nextOrchestraSeat(id);

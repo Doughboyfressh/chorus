@@ -1,7 +1,7 @@
 import { boundedText, MAX_ARTIFACT } from "./integrity.ts";
 import { completeObject, readMerge, fullSeatText } from "./artifact-text.ts";
 import { FINDINGS_INSTRUCTIONS } from "./findings.ts";
-import { extractJson } from "./parse.ts";
+import { readConductor, ConductorValidationError, CONDUCTOR_SCHEMA } from "./conductor.ts";
 import { examFor, gradeArtifact } from "./grade.ts";
 import { labBrief, resolveGoal } from "./labs.ts";
 import type { Agent } from "./types.ts";
@@ -62,46 +62,7 @@ export function startOrchestraState(args: {
   };
 }
 
-function parseConductor(text: string) {
-  try {
-    const parsed = extractJson<{
-      contract?: string;
-      whyThisSplit?: string;
-      specialists?: { id?: string; name?: string; mandate?: string; lens?: string }[];
-    }>(text);
-    const specialists = (Array.isArray(parsed.specialists) ? parsed.specialists : []).slice(0, 3);
-    while (specialists.length < 3) {
-      specialists.push({
-        name: `Specialist ${specialists.length + 1}`,
-        mandate: "Cover a remaining gap.",
-        lens: "What the others missed.",
-      });
-    }
-    return {
-      contract: boundedText(String(parsed.contract || "Deliver a testable artifact."), "contract", MAX_ARTIFACT, 1),
-      whyThisSplit: String(parsed.whyThisSplit || "Non-overlapping mandates.").slice(0, 400),
-      specialists: specialists.map((row, i) => ({
-        id: `s${i + 1}`,
-        name: /^judge$/i.test(String(row.name || ""))
-          ? DEFAULT_STAFF[i]!.name
-          : String(row.name || DEFAULT_STAFF[i]!.name).slice(0, 80),
-        mandate: String(row.mandate || DEFAULT_STAFF[i]!.mandate).slice(0, 400),
-        lens: String(row.lens || DEFAULT_STAFF[i]!.lens).slice(0, 200),
-      })),
-    };
-  } catch {
-    return {
-      contract: boundedText(text, "contract", MAX_ARTIFACT, 1),
-      whyThisSplit: "Fallback split.",
-      specialists: [1, 2, 3].map((i) => ({
-        id: `s${i}`,
-        name: `Specialist ${i}`,
-        mandate: "Cover a remaining gap.",
-        lens: "What the others missed.",
-      })),
-    };
-  }
-}
+const parseConductor = readConductor;
 
 function parsePatch(text: string) {
   try {
@@ -119,9 +80,8 @@ function parsePatch(text: string) {
 
 
 function staffOf(orch: Orchestra) {
-  const fromImprover = orch.filled.improver ? parseConductor(orch.filled.improver).specialists : [];
-  const fromConductor = orch.filled.conductor ? parseConductor(orch.filled.conductor).specialists : [];
-  const staff = fromImprover.length ? fromImprover : fromConductor;
+  const raw = orch.filled.improver || orch.filled.conductor;
+  const staff = raw ? parseConductor(raw).specialists : [];
   return staff.length ? staff : DEFAULT_STAFF;
 }
 
@@ -162,6 +122,7 @@ export function seatPrompt(orch: Orchestra, seat: SeatId) {
     return {
       seat,
       role: "Conductor",
+      outputSchema: CONDUCTOR_SCHEMA,
       user: `You are the Conductor. Write a tight contract, then staff 3 specialists with zero overlapping mandates.
 
 ${stay}
@@ -173,7 +134,7 @@ ${pasted}
 Return JSON:
 {"contract":"what done looks like","whyThisSplit":"one sentence","specialists":[{"id":"s1","name":"Two Word Role","mandate":"one sentence unique job","lens":"what they uniquely notice"}]}
 
-Exactly 3 specialists. Names are roles, not cute. Do not staff a trading desk, a tutor, or any other product than this lab.`,
+Exactly 3 specialists. contract must be a string, not a nested object. Invalid JSON or field types are rejected without advancing the seat. Names are roles, not cute. Do not staff a trading desk, a tutor, or any other product than this lab.`,
     };
   }
   if (seat === "s1" || seat === "s2" || seat === "s3") {
@@ -248,6 +209,7 @@ Return JSON:
     return {
       seat,
       role: "Improver",
+      outputSchema: CONDUCTOR_SCHEMA,
       user: `You are the Improver. Open holes are the next contract. Rewrite so the next staff closes them. You MUST return 3 specialists. Do not name them Judge.
 
 ${stay}
@@ -332,7 +294,11 @@ export function orchestraStaff(orch: Orchestra) {
 }
 
 export function orchestraAgents(orch: Orchestra): Agent[] {
-  const staff = orchestraStaff(orch);
+  // Historical malformed fills remain exportable; do not rewrite or coerce them.
+  let staff: ReturnType<typeof orchestraStaff> = null;
+  let legacyError: string | undefined;
+  try { staff = orchestraStaff(orch); }
+  catch (err) { if (!(err instanceof ConductorValidationError)) throw err; legacyError = err.message; }
   const pending = pendingSeat(orch);
   const names: { id: SeatId; role: Agent["role"]; name: string; mandate: string }[] = [
     { id: "conductor", role: "conductor", name: "Conductor", mandate: staff?.contract || "Write the contract." },
@@ -362,14 +328,15 @@ export function orchestraAgents(orch: Orchestra): Agent[] {
   ];
   return names.map((row) => {
     const filled = Boolean(orch.filled[row.id]?.trim());
-    const status: Agent["status"] = filled ? "done" : pending === row.id ? "running" : "pending";
+    const invalid = legacyError && row.id === (orch.filled.improver ? "improver" : "conductor");
+    const status: Agent["status"] = invalid ? "error" : filled ? "done" : pending === row.id ? "running" : "pending";
     return {
       id: row.id,
       role: row.role,
       name: row.name,
       mandate: row.mandate,
       status,
-      headline: filled ? "Filled" : pending === row.id ? "This host" : "Waiting",
+      headline: invalid ? "Invalid legacy contract; raw output preserved" : filled ? "Filled" : pending === row.id ? "This host" : "Waiting",
       body: orch.filled[row.id],
     };
   });

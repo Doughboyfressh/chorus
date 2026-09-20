@@ -1,3 +1,4 @@
+import { readConductor } from "./conductor.ts";
 import { FindingsValidationError, FINDINGS_INSTRUCTIONS } from "./findings.ts";
 import { completeObject } from "./artifact-text.ts";
 import { boundedText, MAX_ARTIFACT, MAX_USER_TEST } from "./integrity.ts";
@@ -60,36 +61,7 @@ Rules: exactly 3 specialists. Names are role-like (Eval Designer, Adversary, His
   });
   if (!result.ok) return result;
   try {
-    const parsed = extractJson<{
-      contract?: unknown;
-      whyThisSplit?: unknown;
-      specialists?: unknown;
-    }>(result.text);
-    const specialistsRaw = Array.isArray(parsed.specialists) ? parsed.specialists : [];
-    const specialists: SpecialistBrief[] = specialistsRaw.slice(0, 3).map((item, i) => {
-      const row = (item ?? {}) as Record<string, unknown>;
-      return {
-        id: asString(row.id, `s${i + 1}`),
-        name: asString(row.name, `Specialist ${i + 1}`),
-        mandate: asString(row.mandate, "Contribute a distinct angle."),
-        lens: asString(row.lens, "A unique failure mode."),
-      };
-    });
-    while (specialists.length < 3) {
-      const i = specialists.length;
-      specialists.push({
-        id: `s${i + 1}`,
-        name: `Specialist ${i + 1}`,
-        mandate: "Cover a remaining gap in the contract.",
-        lens: "What the others missed.",
-      });
-    }
-    return {
-      ok: true,
-      contract: asString(parsed.contract, "Deliver a concrete, testable answer to the goal."),
-      whyThisSplit: asString(parsed.whyThisSplit, "Each specialist owns a non-overlapping surface."),
-      specialists,
-    };
+    return { ok: true, ...readConductor(result.text) };
   } catch (err) {
     const hint = err instanceof Error ? err.message : "unreadable JSON";
     return { ok: false, error: `Conductor ${hint}` };
@@ -356,60 +328,12 @@ Rules: exactly 3 specialists. Each mandate maps to one attack hole. Compact JSON
   });
   if (!result.ok) return result;
   try {
-    const parsed = extractJson<{
-      contract?: unknown;
-      whyThisSplit?: unknown;
-      specialists?: unknown;
-      delta?: Record<string, unknown>;
-    }>(result.text);
-    const specialistsRaw = Array.isArray(parsed.specialists) ? parsed.specialists : [];
-    const fallbackNames = ["Hole Binder", "Kill Author", "Drift Warden"];
-    const previous = new Set((data.ledger?.previousNames ?? []).map((n) => n.toLowerCase()));
-    const specialists: SpecialistBrief[] = specialistsRaw.slice(0, 3).map((item, i) => {
-      const row = (item ?? {}) as Record<string, unknown>;
-      let name = asString(row.name, fallbackNames[i] ?? `Closer ${i + 1}`);
-      if (stalled && previous.has(name.toLowerCase())) name = fallbackNames[i] ?? `Closer ${i + 1}`;
-      const hole = attack[i] ?? attack[0] ?? "the remaining open hole";
-      return {
-        id: asString(row.id, `s${i + 1}`),
-        name,
-        mandate: asString(row.mandate, `Close: ${hole}`),
-        lens: asString(row.lens, "A test that the hole is actually gone."),
-      };
-    });
-    while (specialists.length < 3) {
-      const i = specialists.length;
-      const hole = attack[i] ?? attack[0] ?? "the remaining open hole";
-      specialists.push({
-        id: `s${i + 1}`,
-        name: fallbackNames[i] ?? `Closer ${i + 1}`,
-        mandate: `Close: ${hole}`,
-        lens: "What the last generation left open.",
-      });
-    }
-    const delta = parsed.delta ?? {};
-    return {
-      ok: true,
-      contract: asString(parsed.contract, `Close these holes and do not reopen frozen work: ${attack.join("; ")}`),
-      whyThisSplit: asString(
-        parsed.whyThisSplit,
-        "Each specialist owns one attack hole and none of the frozen claims.",
-      ),
-      specialists,
-      delta: {
-        changed: asStringList(delta.changed).slice(0, 4),
-        reason: asString(delta.reason, attack[0] ?? "Open holes remain."),
-        betterBecause: asString(
-          delta.betterBecause,
-          "The next judge should mark at least one attack hole closed.",
-        ),
-        targets: asStringList(delta.targets).slice(0, 6).length
-          ? asStringList(delta.targets).slice(0, 6)
-          : attack.slice(0, 6),
-      },
-    };
-  } catch {
-    return { ok: false, error: "Improver returned unreadable JSON" };
+    const parsed = readConductor(result.text);
+    return { ok: true, contract: parsed.contract, whyThisSplit: parsed.whyThisSplit,
+      specialists: parsed.specialists,
+      delta: parsed.delta ?? { changed: [], targets: [], reason: "", betterBecause: "" } };
+  } catch (err) {
+    return { ok: false, error: `Improver ${err instanceof Error ? err.message : "unreadable JSON"}` };
   }
 }
 
