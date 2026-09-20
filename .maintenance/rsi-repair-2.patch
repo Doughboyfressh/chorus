@@ -1,0 +1,126 @@
+diff --git a/src/lib/chorus/mcp-sitting.ts b/src/lib/chorus/mcp-sitting.ts
+index 031b248..2ddfbc4 100644
+--- a/src/lib/chorus/mcp-sitting.ts
++++ b/src/lib/chorus/mcp-sitting.ts
+@@ -0,0 +1,2 @@
++import { validateFindings } from "./findings.ts";
++import { maxFixtureLevel } from "./fixtures.ts";
+@@ -149,0 +152 @@ export async function markExam(sessionId: string, labId: string, level: number,
++  if (sitting.scores.length >= 8) throw new Error("Generation cap reached. Preserve the ledger; reset only with explicit permission.");
+@@ -151 +154 @@ export async function markExam(sessionId: string, labId: string, level: number,
+-    throw new Error("Lab and level are pinned. Reset explicitly to start a different test.");
++    throw new Error(`Lab is pinned to ${sitting.labId}; current level is ${sitting.level}. Omit level to use it. A full pass advances automatically without reset. Explicit reset is required only to change labs or restart at another level.`);
+@@ -199 +202 @@ export async function recordScore(sessionId: string, artifact: string, graded: E
+-    throw new Error("Lab and level are pinned. Reset explicitly to start a different test.");
++    throw new Error(`Lab is pinned to ${sitting.labId}; current level is ${sitting.level}. Omit level to use it. A full pass advances automatically without reset. Explicit reset is required only to change labs or restart at another level.`);
+@@ -324,0 +328,8 @@ export async function sittingToRun(sessionId: string): Promise<SwarmRun | null>
++export function progressionFor(sitting: McpSitting) {
++  const last = sitting.scores.at(-1)?.evaluation;
++  return { currentLevel: sitting.level, lastScoredLevel: last?.level ?? null,
++    maxLevel: maxFixtureLevel(sitting.labId), capped: sitting.scores.length >= 8,
++    exhausted: Boolean(last?.exhausted),
++    policy: "A full diagnostic pass automatically advances one level without reset. Omit level on the next exam. Comparisons are within the same test only; clean training stays locked." };
++}
++
+@@ -331,0 +343 @@ export async function sittingSnapshot(sessionId: string) {
++    progression: progressionFor(sitting),
+@@ -375 +387 @@ export async function applySittingUpdate(
+-  if (args.contract?.trim()) sitting.contract = args.contract.trim().slice(0, 8000);
++  if (args.contract?.trim()) sitting.contract = boundedText(args.contract, "contract", MAX_ARTIFACT, 1);
+@@ -386 +398 @@ export async function applySittingUpdate(
+-      { specialist: args.specialist.trim().slice(0, 80), patch: args.patch.trim().slice(0, 8000) },
++      { specialist: args.specialist.trim().slice(0, 80), patch: boundedText(args.patch, "patch", MAX_ARTIFACT, 1) },
+@@ -389 +401 @@ export async function applySittingUpdate(
+-  if (args.merge?.trim()) sitting.merge = args.merge.trim().slice(0, 24_000);
++  if (args.merge?.trim()) sitting.merge = boundedText(args.merge, "artifact", MAX_ARTIFACT, 8);
+@@ -418 +430 @@ export async function nextOrchestraSeat(sessionId: string) {
+-    return { done: true, pairCount: sitting.pairs.length, generations: sitting.scores.length };
++    return { done: true, pairCount: sitting.pairs.length, cleanPairCount: 0, generations: sitting.scores.length, progression: progressionFor(sitting) };
+@@ -420,0 +433 @@ export async function nextOrchestraSeat(sessionId: string) {
++    if (sitting.scores.length >= 8) return { error: "Generation cap reached. Existing artifact and ledger are preserved.", capped: true };
+@@ -427 +440 @@ export async function nextOrchestraSeat(sessionId: string) {
+-    return { done: false, ...seatPrompt(sitting.orchestra, seat), attemptId: attempt?.attemptId,
++    return { done: false, ...seatPrompt({ ...sitting.orchestra, labId: sitting.labId, level: sitting.level }, seat), attemptId: attempt?.attemptId,
+@@ -442,0 +456 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
++  let examGrade: EvalResult | undefined;
+@@ -443,0 +458,2 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
++    if (sitting.scores.length >= 8) return { error: "Generation cap reached. Existing artifact and ledger are preserved.", capped: true };
++    validateFindings(text); // BEFORE consuming the attempt or filling the seat.
+@@ -444,0 +461 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
++    examGrade = gradeArtifact({ labId: sitting.labId, deliverable: artifact, findings: text, level: sitting.level });
+@@ -464,6 +481 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
+-    const graded = gradeArtifact({
+-      labId: sitting.labId,
+-      deliverable,
+-      findings: text,
+-      level: sitting.level,
+-    });
++    const graded = examGrade!;
+@@ -486,0 +499,2 @@ export async function fillOrchestraSeat(sessionId: string, seat: string, text: s
++      pairCount: recorded.sitting.pairs.length, cleanPairCount: 0,
++      progression: progressionFor(recorded.sitting),
+diff --git a/src/lib/chorus/orchestra.ts b/src/lib/chorus/orchestra.ts
+index 1a040bb..7402dd4 100644
+--- a/src/lib/chorus/orchestra.ts
++++ b/src/lib/chorus/orchestra.ts
+@@ -0,0 +1,3 @@
++import { boundedText, MAX_ARTIFACT } from "./integrity.ts";
++import { completeObject, readMerge, fullSeatText } from "./artifact-text.ts";
++import { FINDINGS_INSTRUCTIONS } from "./findings.ts";
+@@ -56 +59 @@ export function startOrchestraState(args: {
+-    pasted: args.pasted ? clip(args.pasted, 8000) : undefined,
++    pasted: args.pasted ? boundedText(args.pasted, "artifact", MAX_ARTIFACT, 8) : undefined,
+@@ -78 +81 @@ function parseConductor(text: string) {
+-      contract: String(parsed.contract || "Deliver a testable artifact.").slice(0, 2000),
++      contract: boundedText(String(parsed.contract || "Deliver a testable artifact."), "contract", MAX_ARTIFACT, 1),
+@@ -91 +94 @@ function parseConductor(text: string) {
+-      contract: clip(text, 2000) || "Deliver a testable artifact.",
++      contract: boundedText(text, "contract", MAX_ARTIFACT, 1),
+@@ -105 +108 @@ function parsePatch(text: string) {
+-    const parsed = extractJson<{ headline?: string; patch?: string; findings?: string[] }>(text);
++    const parsed = completeObject(text);
+@@ -108 +111 @@ function parsePatch(text: string) {
+-      patch: String(parsed.patch || text).slice(0, 8000),
++      patch: boundedText(String(parsed.patch || text), "specialist patch", MAX_ARTIFACT, 1),
+@@ -111,2 +114,3 @@ function parsePatch(text: string) {
+-  } catch {
+-    return { headline: "", patch: clip(text, 8000), findings: [] };
++  } catch (err) {
++    if (/^(?:[\[{]|```)/.test(text.trim())) throw err;
++    return { headline: "", patch: boundedText(text, "specialist patch", MAX_ARTIFACT, 1), findings: [] };
+@@ -116,11 +119,0 @@ function parsePatch(text: string) {
+-function parseMerge(text: string) {
+-  try {
+-    const parsed = extractJson<{ title?: string; deliverable?: string }>(text);
+-    return {
+-      title: String(parsed.title || "Merge").slice(0, 120),
+-      deliverable: String(parsed.deliverable || text).slice(0, 24000),
+-    };
+-  } catch {
+-    return { title: "Merge", deliverable: clip(text, 24000) };
+-  }
+-}
+@@ -153 +146 @@ export function seatPrompt(orch: Orchestra, seat: SeatId) {
+-    ? `\nRewrite THIS artifact. Do not start a new essay.\n---\n${orch.pasted.slice(0, 1800)}\n---`
++    ? `\nRewrite THIS artifact. Do not start a new essay.\n---\n${boundedText(orch.pasted, "artifact", MAX_ARTIFACT, 8)}\n---`
+@@ -280,0 +274,3 @@ Return JSON:
++      artifact,
++      exam,
++      artifactCharacters: artifact.length,
+@@ -284 +280 @@ ARTIFACT:
+-${artifact.slice(0, 8000)}
++${boundedText(artifact, "artifact", MAX_ARTIFACT, 8)}
+@@ -292,2 +288 @@ ${exam.input}
+-Return JSON:
+-{"findings":[{"issue":"what the spec caught","quote":"verbatim line from INPUT"}]}`,
++${FINDINGS_INSTRUCTIONS}`,
+@@ -318 +313,5 @@ export function applyFill(orch: Orchestra, seat: SeatId, text: string): Orchestr
+-  return { ...orch, filled: { ...orch.filled, [seat]: clip(text, 24_000) } };
++  fullSeatText(seat, text);
++  if (seat === "conductor" || seat === "improver") parseConductor(text);
++  if (seat === "s1" || seat === "s2" || seat === "s3") parsePatch(text);
++  if (seat === "synthesizer") readMerge(text); // Validate BEFORE changing the pending seat.
++  return { ...orch, filled: { ...orch.filled, [seat]: text } };
+@@ -324 +323 @@ export function mergeDeliverable(orch: Orchestra) {
+-  return parseMerge(raw).deliverable;
++  return readMerge(raw).deliverable;
