@@ -1,0 +1,81 @@
+name: Verify task-aware grading repair
+on:
+  push:
+    branches: [fix/task-aware-grading]
+    paths: ['.maintenance/**', '.github/workflows/apply-grader-repair.yml']
+permissions:
+  contents: write
+concurrency:
+  group: reviewed-grader-repair
+  cancel-in-progress: true
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/task-aware-grading
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Preserve source for exact-byte verification
+        run: |
+          mkdir -p evidence
+          git archive --format=tar HEAD > staged-source.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grader-staged-${{ github.run_id }}
+          path: staged-source.tar
+          retention-days: 3
+      - name: Check and apply reviewed patch
+        run: |
+          python3 - <<'PY'
+          import base64, gzip, hashlib
+          from pathlib import Path
+          encoded = ''.join(Path(f'.maintenance/grader-repair-{i}.b64').read_text().strip() for i in range(3))
+          compressed = base64.b64decode(encoded, validate=True)
+          assert hashlib.sha256(compressed).hexdigest() == 'a2acd350d1af5acc0266bb9b9a95c76f49c2fff70ed3133000b51dfad6033c73', 'Staged bytes differ from reviewed repair'
+          patch = gzip.decompress(compressed)
+          assert hashlib.sha256(patch).hexdigest() == 'e45d179ddc58ca62534498e2bd04f0ec4e398c559d317aaeba74df307ead88df'
+          Path('/tmp/grader.patch').write_bytes(patch)
+          PY
+          git apply --check /tmp/grader.patch
+          git apply /tmp/grader.patch
+          git diff --check
+      - name: Update lock for exact test-only Express dependency
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund 2>&1 | tee evidence/lock.log
+          npm ci --ignore-scripts --no-audit --no-fund 2>&1 | tee evidence/install.log
+      - name: Chorus regressions
+        run: node --experimental-strip-types --test src/lib/chorus/*.test.ts 2>&1 | tee evidence/core.log
+      - name: Production SQL integration tests
+        run: npm run test:integrity:db 2>&1 | tee evidence/sql.log
+      - name: Real HTTP and database security fixture tests
+        run: npm run test:fixtures 2>&1 | tee evidence/fixtures.log
+      - name: Application and authentication tests
+        run: node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/app-data/readiness-schedule.test.ts src/lib/auth/gate-identity.test.ts src/lib/auth/sign-in-gate.test.ts 2>&1 | tee evidence/application.log
+      - name: Build and generate route types
+        run: npm run build:dev 2>&1 | tee evidence/build.log
+      - name: Typecheck
+        run: npm run typecheck 2>&1 | tee evidence/typecheck.log
+      - name: Commit verified source to repair branch only
+        run: |
+          git config user.name 'Doughboyfressh'
+          git config user.email 'Doughboyfressh@users.noreply.github.com'
+          rm .maintenance/grader-repair-*.b64 .github/workflows/apply-grader-repair.yml
+          git add src tests package.json package-lock.json SECURITY.md .github/workflows .maintenance
+          git commit -m 'fix: task-aware diagnostic grading, grounded fixtures and stable execution identity'
+          git push origin HEAD:fix/task-aware-grading
+          git rev-parse HEAD > evidence/verified-commit.txt
+      - name: Archive verified source and evidence
+        if: always()
+        run: git archive --format=tar HEAD > evidence/source.tar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: grader-verification-${{ github.run_id }}
+          path: evidence
+          retention-days: 7
