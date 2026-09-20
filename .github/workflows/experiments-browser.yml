@@ -12,6 +12,23 @@ jobs:
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: chorus_test
+          POSTGRES_USER: chorus_test
+          POSTGRES_PASSWORD: disposable_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chorus_test -d chorus_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://chorus_test:disposable_ci_only@127.0.0.1:5432/chorus_test
+      CHORUS_BROWSER_BASE: http://127.0.0.1:8081
     defaults:
       run:
         shell: bash
@@ -24,13 +41,15 @@ jobs:
           node-version: '22'
           cache: npm
       - run: mkdir -p evidence && npm ci --ignore-scripts --no-audit --no-fund
-      - name: Prepare application
+      - name: Apply production migrations to disposable PostgreSQL
+        run: npm run db:migrate 2>&1 | tee evidence/migrations.log
+      - name: Build application
         run: npm run build:dev 2>&1 | tee evidence/build.log
-      - name: Start isolated local application
+      - name: Start built application without development HMR
         run: |
-          npm run dev > evidence/server.log 2>&1 &
-          for i in {1..40}; do if curl -sf http://127.0.0.1:8080/experiments >/dev/null; then break; fi; sleep 1; done
-          curl -sf http://127.0.0.1:8080/experiments >/dev/null
+          npm run preview > evidence/server.log 2>&1 &
+          for i in {1..40}; do if curl -sf http://127.0.0.1:8081/experiments >/dev/null; then break; fi; sleep 1; done
+          curl -sf http://127.0.0.1:8081/experiments >/dev/null
       - name: Install browser for the locked test dependency
         run: npx playwright install --with-deps chromium
       - name: Test persistence, cross-device recovery and client run controls
