@@ -1,5 +1,7 @@
 /** Public practice results are never attestations of execution or generalization. */
 export const INTEGRITY_VERSION = 2;
+/** Bumped when practice inputs OR grading rules change. Not an integrity certification. */
+export const GRADER_VERSION = 3;
 export const INTEGRITY_NOTE =
   "Unverified practice result. Public fixtures and caller-selected executors cannot certify improvement or clean training data.";
 export const MAX_ARTIFACT = 24_000;

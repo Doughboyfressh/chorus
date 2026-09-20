@@ -24,7 +24,7 @@ async function rpc(id: string, name: string, args: Record<string, unknown> = {})
 }
 function diagnosticFindings(level: number, limit?: number) {
   const f = resolveFixture("rsi", level);
-  return JSON.stringify({ findings: f.planted.slice(0, limit).map(p => ({ issue: p.anyOf[0],
+  return JSON.stringify({ findings: f.planted.slice(0, limit).map(p => ({ issue: ({mut_out: "Revise the contract rule and test its changed behavior.", kill_out: "Reject if score < 0.85 or critical violations >=1.", numeric2: "Reject the rename with unchanged score 41.", test_out: "Require a failing regression test with the intended assertion.", halt_out: "Halt after two consecutive stalls."} as Record<string,string>)[p.id],
     quote: f.input.split("\n").find(line => p.quote?.some(q => line.includes(q)))!.trim() })) });
 }
 async function fillToExam(id: string, deliverable: string) {

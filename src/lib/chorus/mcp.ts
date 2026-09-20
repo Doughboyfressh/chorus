@@ -1,3 +1,4 @@
+import { EXECUTION_PROFILE_SCHEMA } from "./execution-profile.ts";
 import { FindingsValidationError, validateFindings, FINDINGS_INSTRUCTIONS } from "./findings.ts";
 import { MAX_SEAT_TEXT } from "./artifact-text.ts";
 import { maxFixtureLevel } from "./fixtures.ts";
@@ -47,7 +48,8 @@ Otherwise a host sitting:
 3. A later diagnostic can produce a contaminated review candidate only on the same test and changed text. It is not evidence of independent improvement. Clean training exports are unavailable.
 4. A 100/100 pass with no failed checks automatically advances to the next available level WITHOUT wiping history. Omit level to use the current level; never invent levels beyond maxLevel.
 5. Diagnostic 0–100 scores and unverified review candidates are allowed. Only clean training exports are locked. A format error is not a zero; correct the format, do not change the findings to match the checker.
-6. At the generation cap, preserve the artifact and ledger. Reset only with the user's explicit permission, never to manufacture progress.
+6. executor is a display label only. Declare changed model/settings with executionConfig before chorus_exam. An undeclared host uses a stable session identity; neither establishes independent execution.
+7. At the generation cap, preserve the artifact and ledger. Reset only with the user's explicit permission, never to manufacture progress.
 
 ${FINDINGS_INSTRUCTIONS}
 
@@ -67,6 +69,7 @@ const TOOLS = [
       type: "object",
       properties: {
         artifact: { type: "string", description: "Exact artifact to freeze for this attempt." },
+        executionConfig: EXECUTION_PROFILE_SCHEMA,
         labId: { type: "string", description: "rsi | prompt | eval | stress | data | generic" },
         level: { type: "integer", minimum: 0, description: "Omit to use the current level. Full passes advance automatically; no reset required." },
         userTest: { type: "string" },
@@ -114,7 +117,8 @@ const TOOLS = [
         specialist: { type: "string" },
         patch: { type: "string" },
         merge: { type: "string" },
-        executor: { type: "string" },
+        executor: { type: "string", description: "Display label only; it is not the execution configuration." },
+        executionConfig: EXECUTION_PROFILE_SCHEMA,
         conduct: { type: "boolean", description: "Start the eight-seat swarm. Chorus issues each seat via chorus_next." },
         goal: { type: "string" },
         pasted: { type: "string" },
@@ -177,7 +181,7 @@ export async function handleMcp(body: unknown, ctx: McpCtx): Promise<unknown | n
       return ok(msg.id, {
         protocolVersion: protocol,
         capabilities: { tools: { listChanged: true }, prompts: {}, resources: {} },
-        serverInfo: { name: "chorus", version: "2.1.0" },
+        serverInfo: { name: "chorus", version: "2.2.0" },
         instructions: SITTING_PROMPT,
       });
     }
@@ -228,7 +232,7 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
     const artifact = boundedText(args.artifact, "artifact", MAX_ARTIFACT, 8);
     const userTest = args.userTest === undefined ? undefined : String(args.userTest);
     const exam = examFor(labId, level, userTest);
-    const attempt = await markExam(sessionId, labId, level, artifact, userTest);
+    const attempt = await markExam(sessionId, labId, level, artifact, userTest, args.executionConfig);
     return textResult({ ...exam, ...attempt, progression: progressionFor(await sittingFor(sessionId)) });
   }
   if (name === "chorus_score") {
@@ -243,6 +247,7 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
     if (typeof args.attemptId !== "string" || !examReady(current, labId, level, artifact, args.attemptId, userTest)) {
       return textResult({ error: "chorus_exam first with this exact artifact and test. Supply its unused, unexpired attemptId." }, true);
     }
+    const boundExecutionContext = current.exam!.executionContext;
     // Validate and grade without side effects, then atomically consume exactly once.
     if (exam.execute || args.findings !== undefined) validateFindings(args.findings);
     const findings = args.findings as string | undefined;
@@ -252,7 +257,7 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
       return textResult({ error: "chorus_exam first with this exact artifact and test. Supply its unused, unexpired attemptId." }, true);
     }
     const recorded = await recordScore(sessionId, artifact, graded,
-      args.goal ? String(args.goal) : "", args.executor ? String(args.executor) : undefined);
+      args.goal ? String(args.goal) : "", args.executor ? String(args.executor) : undefined, boundExecutionContext);
     return textResult({
       ...recorded.graded, sittingId: recorded.sitting.id, pair: recorded.pair,
       pairCount: recorded.sitting.pairs.length, cleanPairCount: 0,
@@ -282,6 +287,7 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
       args.patch ||
       args.merge ||
       args.executor ||
+      args.executionConfig ||
       args.labId ||
       args.conduct;
     if (mutated) {
@@ -296,6 +302,7 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
         patch: args.patch ? String(args.patch) : undefined,
         merge: args.merge ? String(args.merge) : undefined,
         executor: args.executor ? String(args.executor) : undefined,
+        executionConfig: args.executionConfig,
         conduct: args.conduct === true,
         goal: args.goal ? String(args.goal) : undefined,
         pasted: args.pasted ? String(args.pasted) : undefined,

@@ -1,14 +1,14 @@
 import { requireDurableDatabase } from "./durable-storage.ts";
-import { boundedText, MAX_ARTIFACT, MAX_USER_TEST } from "./integrity.ts";
+import { boundedText, GRADER_VERSION, MAX_ARTIFACT, MAX_USER_TEST } from "./integrity.ts";
 import type { Sql } from "../db.ts";
 
-export type ExamBinding = { labId: string; level: number; artifact: string; userTest?: string };
+export type ExamBinding = { labId: string; level: number; artifact: string; userTest?: string; graderVersion?: number; executionContext?: string };
 export const EXAM_TTL_MS = 10 * 60_000;
 const memory = new Map<string, { sitting: string; key: string; expiresAt: number; consumed: boolean }>();
 const contextKey = (b: ExamBinding) => {
   boundedText(b.artifact, "artifact", MAX_ARTIFACT, 8);
   boundedText(b.userTest ?? "", "userTest", MAX_USER_TEST);
-  return JSON.stringify([2, b.labId, b.level, b.artifact, b.userTest ?? ""]);
+  return JSON.stringify([2, GRADER_VERSION, b.graderVersion ?? GRADER_VERSION, b.executionContext ?? "unverified-test", b.labId, b.level, b.artifact, b.userTest ?? ""]);
 };
 
 export function databaseAttempts(sql: Sql) {
