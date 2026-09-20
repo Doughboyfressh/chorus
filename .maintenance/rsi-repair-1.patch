@@ -1,0 +1,129 @@
+diff --git a/src/lib/chorus/fixtures.ts b/src/lib/chorus/fixtures.ts
+index 64fc558..0913247 100644
+--- a/src/lib/chorus/fixtures.ts
++++ b/src/lib/chorus/fixtures.ts
+@@ -0,0 +1,2 @@
++import { validateFindings, type Finding } from "./findings.ts";
++export type { Finding } from "./findings.ts";
+@@ -204 +205,0 @@ export function matchCheck(text: string, check: FixtureCheck, source?: string):
+-export type Finding = { issue: string; quote: string };
+@@ -218,21 +219 @@ export function parseFindings(text: string): Finding[] {
+-  if (text.length > 32_000) return [];
+-  try {
+-    const parsed: unknown = JSON.parse(text);
+-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+-    const rows = (parsed as { findings?: unknown }).findings;
+-    if (!Array.isArray(rows) || rows.length > 64) return [];
+-    const out: Finding[] = [];
+-    for (const row of rows) {
+-      if (!row || typeof row !== "object" || Array.isArray(row)) return [];
+-      const rec = row as Record<string, unknown>;
+-      if (Object.keys(rec).some((key) => key !== "issue" && key !== "quote")) return [];
+-      if (typeof rec.issue !== "string" || typeof rec.quote !== "string") return [];
+-      const issue = rec.issue.trim();
+-      const quote = rec.quote.trim();
+-      if (!issue || issue.length > 1200 || !quote || quote.length > 2000 || /[\r\n]/.test(quote)) return [];
+-      out.push({ issue, quote });
+-    }
+-    return out;
+-  } catch {
+-    return [];
+-  }
++  try { return validateFindings(text); } catch { return []; }
+diff --git a/src/lib/chorus/integrity.ts b/src/lib/chorus/integrity.ts
+index e684a99..d6d4bee 100644
+--- a/src/lib/chorus/integrity.ts
++++ b/src/lib/chorus/integrity.ts
+@@ -27,0 +28 @@ export type DiagnosticIdentity = {
++  submissionStatus?: "not_run" | "scored";
+@@ -32 +33 @@ export function comparableDiagnostics(a?: DiagnosticIdentity, b?: DiagnosticIden
+-    a && b && a.integrityVersion === INTEGRITY_VERSION && b.integrityVersion === INTEGRITY_VERSION &&
++    a && b && a.submissionStatus !== "not_run" && b.submissionStatus !== "not_run" && a.integrityVersion === INTEGRITY_VERSION && b.integrityVersion === INTEGRITY_VERSION &&
+diff --git a/src/lib/chorus/ledger.ts b/src/lib/chorus/ledger.ts
+index d576b04..9a636f5 100644
+--- a/src/lib/chorus/ledger.ts
++++ b/src/lib/chorus/ledger.ts
+@@ -1 +1 @@
+-import { comparableDiagnostics, type DiagnosticIdentity } from "./integrity.ts";
++import { boundedText, MAX_ARTIFACT, comparableDiagnostics, type DiagnosticIdentity } from "./integrity.ts";
+@@ -52 +52 @@ export function sittingArtifact(run: SwarmRun | null | undefined): SittingArtifa
+-export function formatArtifact(art: SittingArtifact, limit = 2400): string {
++export function formatArtifact(art: SittingArtifact): string {
+@@ -60 +60 @@ export function formatArtifact(art: SittingArtifact, limit = 2400): string {
+-      ? `Origin (gen 0):\n---\n${art.origin.slice(0, 1200)}\n---\n\n`
++      ? `Origin (gen 0):\n---\n${boundedText(art.origin, "original artifact", MAX_ARTIFACT, 1)}\n---\n\n`
+@@ -63 +63 @@ export function formatArtifact(art: SittingArtifact, limit = 2400): string {
+-  return `${origin}Current artifact${title}. Improve THIS. Do not start from a blank page.\n---\n${art.current.slice(0, limit)}\n---\n${score}`.trim();
++  return `${origin}Current artifact${title}. Improve THIS. Do not start from a blank page.\n---\n${boundedText(art.current, "current artifact", MAX_ARTIFACT, 1)}\n---\n${score}`.trim();
+diff --git a/src/lib/chorus/mcp.ts b/src/lib/chorus/mcp.ts
+index d4f07bd..0688c11 100644
+--- a/src/lib/chorus/mcp.ts
++++ b/src/lib/chorus/mcp.ts
+@@ -1 +1,4 @@
+-import { boundedText, cleanTrainingRows, MAX_ARTIFACT, MAX_FINDINGS } from "./integrity.ts";
++import { FindingsValidationError, validateFindings, FINDINGS_INSTRUCTIONS } from "./findings.ts";
++import { MAX_SEAT_TEXT } from "./artifact-text.ts";
++import { maxFixtureLevel } from "./fixtures.ts";
++import { boundedText, cleanTrainingRows, MAX_ARTIFACT } from "./integrity.ts";
+@@ -4 +7 @@ import { examFor, gradeArtifact } from "./grade.ts";
+-import { applySittingUpdate, dropSession, consumeExam, fillOrchestraSeat, markExam, nextOrchestraSeat, recordScore, resetSitting, sittingFor, sittingPairs, sittingSnapshot, sittingToRun } from "./mcp-sitting.ts";
++import { applySittingUpdate, dropSession, consumeExam, examReady, fillOrchestraSeat, markExam, nextOrchestraSeat, recordScore, resetSitting, sittingFor, sittingPairs, sittingSnapshot, sittingToRun, progressionFor } from "./mcp-sitting.ts";
+@@ -45 +48,5 @@ Otherwise a host sitting:
+-4. Generation 8: chorus_sitting with reset:true. Same MCP URL.
++4. A 100/100 pass with no failed checks automatically advances to the next available level WITHOUT wiping history. Omit level to use the current level; never invent levels beyond maxLevel.
++5. Diagnostic 0–100 scores and unverified review candidates are allowed. Only clean training exports are locked. A format error is not a zero; correct the format, do not change the findings to match the checker.
++6. At the generation cap, preserve the artifact and ledger. Reset only with the user's explicit permission, never to manufacture progress.
++
++${FINDINGS_INSTRUCTIONS}
+@@ -64 +71 @@ const TOOLS = [
+-        level: { type: "number" },
++        level: { type: "integer", minimum: 0, description: "Omit to use the current level. Full passes advance automatically; no reset required." },
+@@ -80,2 +87,2 @@ const TOOLS = [
+-        findings: { type: "string" },
+-        level: { type: "number" },
++        findings: { type: "string", description: FINDINGS_INSTRUCTIONS },
++        level: { type: "integer", minimum: 0, description: "Omit to use the current level. Full passes advance automatically; no reset required." },
+@@ -85 +92 @@ const TOOLS = [
+-        reset: { type: "boolean", description: "Wipe this sitting first (same MCP URL). Use when generation is 8." },
++        reset: { type: "boolean", description: "Deprecated here: score never resets. Use chorus_sitting reset only with explicit permission." },
+@@ -173 +180 @@ export async function handleMcp(body: unknown, ctx: McpCtx): Promise<unknown | n
+-        serverInfo: { name: "chorus", version: "1.0.0" },
++        serverInfo: { name: "chorus", version: "2.1.0" },
+@@ -200 +207 @@ export async function handleMcp(body: unknown, ctx: McpCtx): Promise<unknown | n
+-        return ok(msg.id, textResult({ error: err instanceof Error ? err.message : "Request rejected" }, true));
++        return ok(msg.id, textResult(err instanceof FindingsValidationError ? err.toResult() : { error: err instanceof Error ? err.message : "Request rejected" }, true));
+@@ -215 +222 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-    return textResult(LABS.map((lab) => ({ id: lab.id, title: lab.title, blurb: lab.blurb, goal: lab.goal })));
++    return textResult(LABS.map((lab) => ({ id: lab.id, title: lab.title, blurb: lab.blurb, goal: lab.goal, maxLevel: maxFixtureLevel(lab.id) })));
+@@ -225 +232 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-    return textResult({ ...exam, ...attempt });
++    return textResult({ ...exam, ...attempt, progression: progressionFor(await sittingFor(sessionId)) });
+@@ -234 +241,9 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-    examFor(labId, level, userTest);
++    const exam = examFor(labId, level, userTest);
++    if (current.scores.length >= 8) return textResult({ error: "Generation cap reached. Preserve the ledger; reset only with explicit permission.", capped: true }, true);
++    if (typeof args.attemptId !== "string" || !examReady(current, labId, level, artifact, args.attemptId, userTest)) {
++      return textResult({ error: "chorus_exam first with this exact artifact and test. Supply its unused, unexpired attemptId." }, true);
++    }
++    // Validate and grade without side effects, then atomically consume exactly once.
++    if (exam.execute || args.findings !== undefined) validateFindings(args.findings);
++    const findings = args.findings as string | undefined;
++    const graded = gradeArtifact({ labId, deliverable: artifact, findings, userTest, level });
+@@ -239,2 +253,0 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-    const findings = args.findings === undefined ? undefined : boundedText(args.findings, "findings", MAX_FINDINGS);
+-    const graded = gradeArtifact({ labId, deliverable: artifact, findings, userTest, level });
+@@ -246,0 +260 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
++      progression: progressionFor(recorded.sitting),
+@@ -260 +274 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-      note: "Same MCP URL. Ledger wiped. Score a weak gen 0 first if you want pairs.",
++      note: "Same MCP URL. Explicit reset completed. Run real evaluations; never fabricate a weak baseline to obtain pairs.",
+@@ -310 +324,2 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-    return textResult(await nextOrchestraSeat(sessionId));
++    const result = await nextOrchestraSeat(sessionId);
++    return textResult(result, "error" in result);
+@@ -315,2 +330,3 @@ async function callTool(params: Record<string, unknown>, ctx: McpCtx) {
+-    boundedText(text, "completion", MAX_FINDINGS, 8);
+-    return textResult(await fillOrchestraSeat(sessionId, String(args.seat ?? ""), text, typeof args.attemptId === "string" ? args.attemptId : undefined));
++    boundedText(text, "completion", MAX_SEAT_TEXT, 8);
++    const result = await fillOrchestraSeat(sessionId, String(args.seat ?? ""), text, typeof args.attemptId === "string" ? args.attemptId : undefined);
++    return textResult(result, "error" in result);
