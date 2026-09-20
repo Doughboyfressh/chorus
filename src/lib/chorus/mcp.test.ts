@@ -309,7 +309,7 @@ describe("handleMcp", () => {
         jsonrpc: "2.0",
         id: 44,
         method: "tools/call",
-        params: { name: "chorus_fill", arguments: { seat: "improver", text: "stalled. no merge." } },
+        params: { name: "chorus_fill", arguments: { seat: "improver", text: JSON.stringify({ contract: "Close remaining holes without altering frozen work.", specialists: [1,2,3].map(i => ({ id: `s${i}`, name: `Closer ${i}`, mandate: "Test the remaining gap." })) }) } },
       },
       sid,
     );

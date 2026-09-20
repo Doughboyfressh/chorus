@@ -40,7 +40,7 @@ try {
   assert.equal((await fetch(base, { signal: AbortSignal.timeout(20000) })).status, 200);
   const direct = context();
   const init = await rpc(direct, 'initialize', { protocolVersion: '2025-03-26' });
-  assert.equal(init.serverInfo.version, '2.2.0'); pass('New server version and live page');
+  assert.equal(init.serverInfo.version, '2.3.0'); pass('New server version and live page');
   const a = 'Review the agent and require concrete changes.';
   let exam = await good(direct, 'chorus_exam', { labId: 'rsi', artifact: a });
   const invalid = await call(direct, 'chorus_score', { artifact: a, attemptId: exam.attemptId, findings: '{"findings":["old schema"]}' });
@@ -74,7 +74,7 @@ try {
     seat = await good(swarm, 'chorus_next');
     if (seat.seat === 'exam') break;
     if (seat.seat === 'conductor' || /^s[123]$/.test(seat.seat)) assert.ok(seat.user.includes(long), 'Long context was truncated');
-    const text = seat.seat === 'conductor' ? JSON.stringify({ contract: 'Preserve every rule including the last line.', specialists: [] }) :
+    const text = seat.seat === 'conductor' ? JSON.stringify({ contract: 'Preserve every rule including the last line.', specialists: [1, 2, 3].map(i => ({ id: `s${i}`, name: `Role ${i}`, mandate: `Preserve constraint ${i}.`, lens: "Evidence" })) }) :
       seat.seat === 'synthesizer' ? JSON.stringify({ title: 'Full contract', deliverable: long }) :
       /^s[123]$/.test(seat.seat) ? JSON.stringify({ headline: 'Full patch', patch: long, findings: [] }) : 'Review complete. Preserve every rule in the merged artifact.';
     await good(swarm, 'chorus_fill', { seat: seat.seat, text });

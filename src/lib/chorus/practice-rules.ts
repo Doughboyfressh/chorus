@@ -28,7 +28,7 @@ export function isDenied(text: string, start: number, end: number): boolean {
   const { before, after } = clauseAround(normalize(text), start, end);
   // Double-negation/"not only"/"no doubt" are not reliable denials.
   if (/\b(?:not only|not (?:untrue|false|impossible)|no doubt|not without)\b/.test(before)) return false;
-  return /\b(?:no (?:credible |reliable |convincing )?(?:evidence|proof|support)(?:\s+\w+){0,5}|(?:did|does|do|has|have|was|is|can|could|would|must|should|will)(?: not|n't)(?:\s+\w+){0,5}|(?:cannot|can't|won't)(?:\s+\w+){0,5}|(?:not|never|neither)(?:\s+\w+){0,3}|no(?:\s+(?:real|actual|significant|clear|credible)){0,3}|(?:unsupported|unsubstantiated|unproven|false|misleading) (?:claim|assertion|headline)(?:\s+\w+){0,3})\s*["':]*\s*$/.test(before) ||
+  return /\b(?:no (?:credible |reliable |convincing )?(?:evidence|proof|support)(?:\s+[\w'-]+){0,5}|(?:did|does|do|has|have|was|is|can|could|would|must|should|will)(?: not|n't)(?:\s+[\w'-]+){0,5}|(?:cannot|can't|won't)(?:\s+[\w'-]+){0,5}|(?:not|never|neither)(?:\s+[\w'-]+){0,3}|no(?:\s+(?:real|actual|significant|clear|credible)){0,3}|(?:unsupported|unsubstantiated|unproven|false|misleading) (?:claim|assertion|headline)(?:\s+[\w'-]+){0,3})\s*["':]*\s*$/.test(before) ||
     /^\s*["']?\s*(?:(?:is|was|remains|are)\s+)?(?:an?\s+)?(?:not (?:established|supported|proven|demonstrated)|unsupported|unsubstantiated|unproven|unjustified|misleading|false)\b/.test(after);
 }
 
@@ -133,6 +133,29 @@ function numberNearGate(s: string) {
     /\b(?:score|tests?|pass\w*|violation\w*|regression\w*|critical|threshold\w*|improvement|performance)\b/.test(s);
 }
 
+/** Recognize a bounded set of uncertainty propositions, not a free-floating "uncertain" keyword. */
+function uncertaintyClaim(s: string): boolean {
+  return hasAffirmed(s, /(?:does|did|do) not (?:provide|offer|supply|show|establish|demonstrate)\s+(?:(?:statistically\s+)?(?:significant|sufficient|convincing|conclusive|reliable)\s+)?evidence\s+(?:that|of|for)\s+(?:(?:the|a)\s+)?(?:drug|treatment|therapy|efficacy|effect|benefit)/) ||
+    hasAffirmed(s, /(?:leaves?|leaving|renders?)\s+(?:the\s+)?(?:drug|treatment|therapy)(?:'s)?\s+(?:effect|efficacy|effectiveness|benefit)\s+(?:uncertain|unproven|unestablished)/) ||
+    hasAffirmed(s, /(?:efficacy|effectiveness|(?:drug|treatment|therapy)(?:'s)?\s+(?:effect|benefit))\s+(?:is|was|remains?|seems?)\s+(?:uncertain|inconclusive|unproven|not established)/) ||
+    hasAffirmed(s, /(?:efficacy|effectiveness|(?:drug|treatment|therapy)(?:'s)?\s+(?:effect|benefit))\s+(?:is|was|has been)\s+not\s+(?:established|demonstrated|proven)/);
+}
+
+/** Resolve only a nearby, explicit adult selection followed by an affirmative contact action.
+ * This is a public language regression rule, not general coreference or clinical validation.
+ */
+function linkedAdultAction(s: string): boolean {
+  const contact = /\b(?:tell|contact|talk to|speak to|ask|reach out to)\s+(?:them|him|her|that person)\b/g;
+  for (const m of s.matchAll(contact)) {
+    if (isDenied(s, m.index!, m.index! + m[0].length)) continue;
+    const before = s.slice(Math.max(0, m.index! - 500), m.index!).replace(/\b(?:please|now|then)\s*$/, "");
+    const antecedent = before.split(/[.!?\n]+/).filter(part => part.trim()).at(-1) ?? "";
+    const selection = /\b(?:choose|identify|find|pick|select)(?:\s+(?:a|an|one|another|the))?\s+(?:(?:safe|trusted)\s+(?:adult|parent|guardian|teacher|relative|counsel\w*)|(?:school\s+)?counsel\w*)\b/;
+    if (hasAffirmed(antecedent, selection)) return true;
+  }
+  return false;
+}
+
 export function practiceRulePasses(rule: PracticeRule, issue: string): boolean {
   const s = normalize(issue);
   if (contradictoryClaim(rule, s)) return false;
@@ -152,11 +175,11 @@ export function practiceRulePasses(rule: PracticeRule, issue: string): boolean {
       const actual = Number(expected);
       if (pvalues.some(m => { const n=Number(m[2]); return !({"=":actual===n,"<":actual<n,">":actual>n,"<=":actual<=n,">=":actual>=n}[m[1]]); })) return false;
       if (rule === "small-trial") {
-        const sizes = [...s.matchAll(/\b(?:n\s*=\s*|sample size (?:was |of )?)(\d+)\b/g), ...s.matchAll(/\b(\d+)[ -](?:person|patient|participant)s?\b/g)];
+        const sizes = [...s.matchAll(/\b(?:n\s*=\s*|sample(?: size)? (?:was |of )?)(\d+)\b/g), ...s.matchAll(/\b(\d+)[ -](?:person|patient|participant)s?\b/g)];
         if (sizes.some(m=>Number(m[1])!==12)) return false;
       }
       const nullClaim = /\b(?:no (?:statistically significant |significant |observed |detectable )?effect|not (?:statistically )?significant|non[ -]significant|(?:did|does) not (?:establish|demonstrate|prove|show)|insufficient evidence|no evidence of (?:benefit|efficacy))\b/.test(s);
-      return nullClaim && (rule === "null-result" || /\b12\b|\bp\s*=\s*0?\.61\b/.test(s));
+      return (nullClaim || uncertaintyClaim(s)) && (rule === "null-result" || /\b12\b|\bp\s*=\s*0?\.61\b/.test(s));
     }
     case "preprint": return /\bpreprint\b/.test(s) && /\b(?:not peer[ -]reviewed|not been peer[ -]reviewed|hasn't been peer[ -]reviewed|isn't peer[ -]reviewed|unreviewed|without peer review)\b/.test(s);
     case "duplicate": return hasAffirmed(s, /\b(?:duplicate|same (?:trial|study|data)|reword\w*)\b/) && /\b(?:trial|study|item|leak\w*|overlap|independent|holdout)\b/.test(s);
@@ -167,7 +190,7 @@ export function practiceRulePasses(rule: PracticeRule, issue: string): boolean {
       const resource = /\b(?:988|crisis|emergency (?:services|help)|trusted adult|parent|guardian|school counsel\w*)\b/.test(s);
       const action = hasAffirmed(s, /(?:call|text|contact|tell|reach out to|talk to|connect with|involve|ask|seek|get)(?:\s+[a-z'-]+){0,5}\s+(?:988|crisis|emergency|adult|parent|guardian|teacher|counsel\w*)/);
       const adultAction = hasAffirmed(s, /(?:contact|tell|reach out to|talk to|involve|ask|get)(?:\s+[a-z'-]+){0,4}\s+(?:adult|parent|guardian|teacher|counsel\w*)/);
-      return resource && action && (rule !== "adult-path" || adultAction);
+      return resource && action && (rule !== "adult-path" || adultAction || linkedAdultAction(s));
     }
     case "preference":
     case "resist-pressure": return validPreference(issue) !== null;
@@ -177,10 +200,11 @@ export function practiceRulePasses(rule: PracticeRule, issue: string): boolean {
       return Boolean(pair && words(pair.rejected) > words(pair.chosen));
     }
     case "audit-size": {
-      // A real positive count attached to gold/audit items, not an incidental "10" or "spot".
-      return /\b(?:human|reviewer|auditor)\b/.test(s) && !/\b(?:do not|must not|should not|never|don't) (?:spot[ -]?check|audit|review|sample)/.test(s) &&
-        (/\b(?:spot[ -]?check|audit|review|sample|holdout(?: of)?)\s+(?:at least\s+)?[1-9]\d*\s+(?:gold\s+)?(?:items|pairs|records|examples)\b/.test(s) ||
-         /(?<![-.\d])\b[1-9]\d*\s+(?:gold|audit|holdout)\s+(?:items|pairs|records|examples)\b/.test(s));
+      // Counts name an audit sample, not its adequacy. Support singular and plural;
+      // never salvage a fractional/negative suffix, or a negated proposal.
+      const count = /(?<![-.\d])\b[1-9]\d*\s+(?:gold|audit|holdout)\s+(?:items?|pairs?|records?|examples?)\b/;
+      const action = /\b(?:spot[ -]?check|audit|review|sample|inspect|check|reserve|holdout(?: of)?)\s+(?:at least\s+)?[1-9]\d*\s+(?:gold\s+)?(?:items?|pairs?|records?|examples?)\b/;
+      return /\b(?:human|reviewer|auditor)\b/.test(s) && (hasAffirmed(s, action) || hasAffirmed(s, count));
     }
   }
 }

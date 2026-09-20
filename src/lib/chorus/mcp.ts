@@ -1,3 +1,4 @@
+import { ConductorValidationError } from "./conductor.ts";
 import { EXECUTION_PROFILE_SCHEMA } from "./execution-profile.ts";
 import { FindingsValidationError, validateFindings, FINDINGS_INSTRUCTIONS } from "./findings.ts";
 import { MAX_SEAT_TEXT } from "./artifact-text.ts";
@@ -181,7 +182,7 @@ export async function handleMcp(body: unknown, ctx: McpCtx): Promise<unknown | n
       return ok(msg.id, {
         protocolVersion: protocol,
         capabilities: { tools: { listChanged: true }, prompts: {}, resources: {} },
-        serverInfo: { name: "chorus", version: "2.2.0" },
+        serverInfo: { name: "chorus", version: "2.3.0" },
         instructions: SITTING_PROMPT,
       });
     }
@@ -208,7 +209,7 @@ export async function handleMcp(body: unknown, ctx: McpCtx): Promise<unknown | n
       try {
         return ok(msg.id, await callTool(msg.params ?? {}, ctx));
       } catch (err) {
-        return ok(msg.id, textResult(err instanceof FindingsValidationError ? err.toResult() : { error: err instanceof Error ? err.message : "Request rejected" }, true));
+        return ok(msg.id, textResult((err instanceof FindingsValidationError || err instanceof ConductorValidationError) ? err.toResult() : { error: err instanceof Error ? err.message : "Request rejected" }, true));
       }
     case "session/end":
       await dropSession(ctx.sessionId);

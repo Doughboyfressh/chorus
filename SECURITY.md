@@ -192,3 +192,31 @@ explicit live resets do not delete their saved checkpoints. Vault recovery keys
 are hashed at rest, never put in URLs, and do not replace existing MCP sitting
 capabilities. Paid execution requires separate operator authorization and explicit
 server-side provider/budget configuration, and is disabled by default.
+
+
+## Rerun language and conductor repair (server 2.3.0, grader 4)
+
+The conductor/improver JSON boundary is shared between MCP and browser execution.
+New submissions require a text contract and exactly three typed specialist
+mandates. Object/array contracts, coercion placeholders, incomplete JSON, wrong
+types and oversized fields return INVALID_CONDUCTOR without accepting a seat,
+consuming an exam or recording a score. No staff or replacement contract is
+invented. Complete valid strings are preserved, including their final lines.
+Malformed historical raw outputs remain available in the ledger with an error
+indicator; they are not rewritten. A legacy invalid fill with downstream work
+requires a separate child sitting rather than relabeling that old work as valid.
+
+The bounded public grader recognizes additional explicit statistical uncertainty
+wording, a nearby selected safe adult followed by an affirmative pronoun contact
+action, and singular/plural positive audit item counts. Incorrect facts,
+contradictory claims, missing/unrelated evidence, negated contact and zero/negative
+or fractional audit counts have regression counterexamples. Naming one audit item
+only satisfies a count criterion, not statistical adequacy or independent review.
+Unrecognized wording remains criterion_not_demonstrated, not proof of incorrect
+reasoning; these rules do not constitute a semantic or clinical verifier.
+
+Grader identity is now 4. Existing findings and scores remain unchanged; new
+attempts are required across the version boundary, and different grader versions
+cannot form improvement pairs. Integrity version remains 2 and clean training
+exports remain disabled. This is a four-issue repair, not a public-launch or
+paid-provider production-readiness sign-off. No production migration is required.
