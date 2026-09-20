@@ -1,3 +1,5 @@
+import { unscoredSynthesis } from "./evaluation-state.ts";
+import type { SwarmRun } from "./types.ts";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { handleMcp } from "./mcp.ts";
@@ -197,5 +199,22 @@ describe("RSI progression with quarantine intact", () => {
     }
     assert.equal((await rpc(id, "chorus_exam", { artifact })).isError, true);
     assert.equal((await rpc(id, "chorus_sitting")).value.generations, 8);
+  });
+});
+
+
+describe("new artifact assessment isolation", () => {
+  it("clears stale current scores and errors without modifying historical generations", () => {
+    const synthesis = { title: "Previous", deliverable: artifact, steps: [], watchouts: [], pattern: { contract: "", fanout: "", critique: "", merge: "" } };
+    const evaluation = gradeArtifact({ labId: "rsi", deliverable: artifact, findings: empty });
+    const previous: SwarmRun = { id: "state-test", goal: "Review the agent", labId: "rsi", startedAt: 0,
+      generation: 2, phase: "merge", agents: [], synthesis, evaluation, evaluationError: "previous error",
+      evaluationErrorLevel: 0, generations: [{ n: 1, contract: "", whyThisSplit: "", specialists: [], synthesis, evaluation }] };
+    const updated = unscoredSynthesis(previous, { ...synthesis, title: "New", deliverable: artifact + " Apply an additional rule." });
+    assert.equal(updated.evaluation, undefined); assert.equal(updated.evaluationError, undefined);
+    assert.equal(updated.judge, undefined); assert.equal(updated.generations, previous.generations);
+    assert.equal(updated.generations[0].evaluation, evaluation);
+    assert.equal(previous.evaluation, evaluation); assert.equal(previous.synthesis?.title, "Previous");
+    assert.equal(updated.synthesis?.title, "New");
   });
 });

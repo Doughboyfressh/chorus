@@ -1,3 +1,4 @@
+import { unscoredSynthesis } from "./evaluation-state.ts";
 import { create } from "zustand";
 import { HISTORY_LIMIT } from "./labs";
 import { lastCompleteGeneration } from "./ledger";
@@ -578,13 +579,14 @@ export const useChorus = create<Store>((set, get) => ({
     const run = get().run;
     if (!run) return;
     const generation = run.generation ?? 1;
-    const snap = snapshotGeneration({ ...run, synthesis });
+    const unscored = unscoredSynthesis(run, synthesis);
+    const snap = snapshotGeneration(unscored);
     const generations = [
       ...run.generations.filter((g) => g.n !== generation),
       snap,
     ].sort((a, b) => a.n - b.n);
     const next: SwarmRun = {
-      ...run,
+      ...unscored,
       phase: "eval",
       generation,
       generations,

@@ -29,7 +29,9 @@ export function Synthesis() {
     viewingN === 0 && run ? baselineAsGeneration(run) : viewedGeneration(run, viewingN);
   const synthesis = snap?.synthesis ?? run?.synthesis;
   const delta = snap?.delta ?? run?.delta;
-  const evaluation = snap?.evaluation ?? run?.evaluation;
+  const evaluation = snap ? snap.evaluation : run?.evaluation;
+  const evaluationError = snap ? snap.evaluationError : run?.evaluationError;
+  const canRetry = run?.phase === "done" && (!snap || snap.n === run.generation);
   if (!synthesis && !delta && run?.phase !== "judge" && run?.phase !== "eval") return null;
 
   const generation = run?.generation ?? 1;
@@ -93,11 +95,11 @@ export function Synthesis() {
         All results, including legacy runs, are unverified. Clean training export is locked.
       </p>
 
-      {(snap?.evaluationError ?? run?.evaluationError) ? (
+      {evaluationError ? (
         <div role="alert" className="mb-4 rounded-xl bg-surface-2 p-4 text-sm text-danger">
           <p>Evaluation not scored. Your artifact and history are preserved.</p>
-          <p className="mt-2">{snap?.evaluationError ?? run?.evaluationError}</p>
-          <Button className="mt-3" variant="secondary" size="sm" onClick={() => retryEvaluation()} disabled={run?.phase !== "done"}>
+          <p className="mt-2">{evaluationError}</p>
+          <Button className="mt-3" variant="secondary" size="sm" onClick={() => retryEvaluation()} disabled={!canRetry}>
             Retry evaluation only
           </Button>
         </div>
