@@ -1,0 +1,12 @@
+--- a/src/lib/chorus/rerun-regressions.test.ts
++++ b/src/lib/chorus/rerun-regressions.test.ts
+@@ -148,7 +148,8 @@
+     const grade = gradeArtifact({ labId: "eval", deliverable: "Review the input faithfully.", findings: '{"findings":[]}' });
+     assert.equal(GRADER_VERSION, 4);
+     assert.equal(JSON.parse(grade.testKey!)[1], 4);
+-    assert.equal(comparableDiagnostics({ ...grade, graderVersion: 3, testKey: grade.testKey!.replace('[2,4,', '[2,3,') }, { ...grade, score: 100 }), false);
++    const previous = { ...grade, graderVersion: 3, testKey: grade.testKey!.replace('[2,4,', '[2,3,') };
++    assert.equal(comparableDiagnostics(previous, { ...grade, score: 100 }), false);
+   });
+ });
+ 
