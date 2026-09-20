@@ -1,3 +1,6 @@
+import { boundedText, MAX_ARTIFACT } from "./integrity.ts";
+import { completeObject, readMerge, fullSeatText } from "./artifact-text.ts";
+import { FINDINGS_INSTRUCTIONS } from "./findings.ts";
 import { extractJson } from "./parse.ts";
 import { examFor, gradeArtifact } from "./grade.ts";
 import { labBrief, resolveGoal } from "./labs.ts";
@@ -53,7 +56,7 @@ export function startOrchestraState(args: {
     labId,
     level: args.level ?? 0,
     goal: resolveGoal(labId, args.goal),
-    pasted: args.pasted ? clip(args.pasted, 8000) : undefined,
+    pasted: args.pasted ? boundedText(args.pasted, "artifact", MAX_ARTIFACT, 8) : undefined,
     mode: args.recurse ? "recurse" : "gen1",
     filled: args.recurse && args.priorStaff?.trim() ? { conductor: args.priorStaff } : {},
   };
@@ -75,7 +78,7 @@ function parseConductor(text: string) {
       });
     }
     return {
-      contract: String(parsed.contract || "Deliver a testable artifact.").slice(0, 2000),
+      contract: boundedText(String(parsed.contract || "Deliver a testable artifact."), "contract", MAX_ARTIFACT, 1),
       whyThisSplit: String(parsed.whyThisSplit || "Non-overlapping mandates.").slice(0, 400),
       specialists: specialists.map((row, i) => ({
         id: `s${i + 1}`,
@@ -88,7 +91,7 @@ function parseConductor(text: string) {
     };
   } catch {
     return {
-      contract: clip(text, 2000) || "Deliver a testable artifact.",
+      contract: boundedText(text, "contract", MAX_ARTIFACT, 1),
       whyThisSplit: "Fallback split.",
       specialists: [1, 2, 3].map((i) => ({
         id: `s${i}`,
@@ -102,28 +105,18 @@ function parseConductor(text: string) {
 
 function parsePatch(text: string) {
   try {
-    const parsed = extractJson<{ headline?: string; patch?: string; findings?: string[] }>(text);
+    const parsed = completeObject(text);
     return {
       headline: String(parsed.headline || "").slice(0, 200),
-      patch: String(parsed.patch || text).slice(0, 8000),
+      patch: boundedText(String(parsed.patch || text), "specialist patch", MAX_ARTIFACT, 1),
       findings: Array.isArray(parsed.findings) ? parsed.findings.map(String).slice(0, 5) : [],
     };
-  } catch {
-    return { headline: "", patch: clip(text, 8000), findings: [] };
+  } catch (err) {
+    if (/^(?:[\[{]|```)/.test(text.trim())) throw err;
+    return { headline: "", patch: boundedText(text, "specialist patch", MAX_ARTIFACT, 1), findings: [] };
   }
 }
 
-function parseMerge(text: string) {
-  try {
-    const parsed = extractJson<{ title?: string; deliverable?: string }>(text);
-    return {
-      title: String(parsed.title || "Merge").slice(0, 120),
-      deliverable: String(parsed.deliverable || text).slice(0, 24000),
-    };
-  } catch {
-    return { title: "Merge", deliverable: clip(text, 24000) };
-  }
-}
 
 function staffOf(orch: Orchestra) {
   const fromImprover = orch.filled.improver ? parseConductor(orch.filled.improver).specialists : [];
@@ -150,7 +143,7 @@ export function seatPrompt(orch: Orchestra, seat: SeatId) {
   const goal = orch.goal;
   const stay = `Stay on this lab. ${labCtx}`;
   const pasted = orch.pasted?.trim()
-    ? `\nRewrite THIS artifact. Do not start a new essay.\n---\n${orch.pasted.slice(0, 1800)}\n---`
+    ? `\nRewrite THIS artifact. Do not start a new essay.\n---\n${boundedText(orch.pasted, "artifact", MAX_ARTIFACT, 8)}\n---`
     : "";
   const staff = staffOf(orch);
   const contract = contractOf(orch) || "Deliver a testable artifact.";
@@ -278,10 +271,13 @@ Return JSON:
     return {
       seat,
       role: "Exam",
+      artifact,
+      exam,
+      artifactCharacters: artifact.length,
       user: `You are NOT the grader. You ARE this artifact — run it as the system spec. Do not invent findings to match a plate. Return only what this spec produces on the input.
 
 ARTIFACT:
-${artifact.slice(0, 8000)}
+${boundedText(artifact, "artifact", MAX_ARTIFACT, 8)}
 
 TASK:
 ${exam.task}
@@ -289,8 +285,7 @@ ${exam.task}
 INPUT (quote lines from here if the spec actually cites them):
 ${exam.input}
 
-Return JSON:
-{"findings":[{"issue":"what the spec caught","quote":"verbatim line from INPUT"}]}`,
+${FINDINGS_INSTRUCTIONS}`,
     };
   }
   return {
@@ -315,13 +310,17 @@ Return JSON:
 }
 
 export function applyFill(orch: Orchestra, seat: SeatId, text: string): Orchestra {
-  return { ...orch, filled: { ...orch.filled, [seat]: clip(text, 24_000) } };
+  fullSeatText(seat, text);
+  if (seat === "conductor" || seat === "improver") parseConductor(text);
+  if (seat === "s1" || seat === "s2" || seat === "s3") parsePatch(text);
+  if (seat === "synthesizer") readMerge(text); // Validate BEFORE changing the pending seat.
+  return { ...orch, filled: { ...orch.filled, [seat]: text } };
 }
 
 export function mergeDeliverable(orch: Orchestra) {
   const raw = orch.filled.synthesizer;
   if (!raw) return "";
-  return parseMerge(raw).deliverable;
+  return readMerge(raw).deliverable;
 }
 
 export function orchestraStaff(orch: Orchestra) {

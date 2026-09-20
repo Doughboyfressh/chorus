@@ -25,11 +25,12 @@ export type DiagnosticIdentity = {
   level?: number;
   executionContext?: string;
   score?: number;
+  submissionStatus?: "not_run" | "scored";
 };
 
 export function comparableDiagnostics(a?: DiagnosticIdentity, b?: DiagnosticIdentity): boolean {
   return Boolean(
-    a && b && a.integrityVersion === INTEGRITY_VERSION && b.integrityVersion === INTEGRITY_VERSION &&
+    a && b && a.submissionStatus !== "not_run" && b.submissionStatus !== "not_run" && a.integrityVersion === INTEGRITY_VERSION && b.integrityVersion === INTEGRITY_VERSION &&
     a.testKey && a.testKey === b.testKey && a.labId === b.labId && a.level === b.level &&
     a.executionContext && a.executionContext === b.executionContext &&
     Number.isFinite(a.score) && Number.isFinite(b.score) &&

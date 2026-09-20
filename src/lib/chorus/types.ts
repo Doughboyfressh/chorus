@@ -111,6 +111,7 @@ export type EvalResult = {
   labId: string;
   fixture: string;
   score: number;
+  submissionStatus?: "not_run" | "scored";
   passed: string[];
   failed: string[];
   evidence: string;
@@ -132,6 +133,8 @@ export type Generation = {
   delta?: ImproveDelta;
   judge?: JudgeResult;
   evaluation?: EvalResult;
+  evaluationError?: string;
+  evaluationErrorLevel?: number;
 };
 
 export type SlotSnapshot = {
@@ -158,6 +161,8 @@ export type SwarmRun = {
   delta?: ImproveDelta;
   judge?: JudgeResult;
   evaluation?: EvalResult;
+  evaluationError?: string;
+  evaluationErrorLevel?: number;
   fixtureLevel?: number;
   pastedArtifact?: string;
   userTest?: string;

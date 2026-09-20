@@ -1,3 +1,5 @@
+import { validateFindings, type Finding } from "./findings.ts";
+export type { Finding } from "./findings.ts";
 export type FixtureCheck = {
   id: string;
   label: string;
@@ -201,7 +203,6 @@ export function matchCheck(text: string, check: FixtureCheck, source?: string): 
   return true;
 }
 
-export type Finding = { issue: string; quote: string };
 
 function norm(text: string) {
   return text.replace(/\\"/g, '"').replace(/\s+/g, " ").trim().toLowerCase();
@@ -215,27 +216,7 @@ export function sourceLines(source: string) {
 }
 
 export function parseFindings(text: string): Finding[] {
-  if (text.length > 32_000) return [];
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
-    const rows = (parsed as { findings?: unknown }).findings;
-    if (!Array.isArray(rows) || rows.length > 64) return [];
-    const out: Finding[] = [];
-    for (const row of rows) {
-      if (!row || typeof row !== "object" || Array.isArray(row)) return [];
-      const rec = row as Record<string, unknown>;
-      if (Object.keys(rec).some((key) => key !== "issue" && key !== "quote")) return [];
-      if (typeof rec.issue !== "string" || typeof rec.quote !== "string") return [];
-      const issue = rec.issue.trim();
-      const quote = rec.quote.trim();
-      if (!issue || issue.length > 1200 || !quote || quote.length > 2000 || /[\r\n]/.test(quote)) return [];
-      out.push({ issue, quote });
-    }
-    return out;
-  } catch {
-    return [];
-  }
+  try { return validateFindings(text); } catch { return []; }
 }
 
 export function citesSourceLine(quote: string, source: string, quoteNeedles?: string[]) {

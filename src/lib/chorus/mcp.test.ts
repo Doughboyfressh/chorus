@@ -14,7 +14,7 @@ async function handleMcp(body: Parameters<typeof rawHandleMcp>[0], ctx: Paramete
       artifact: args.artifact, labId: args.labId, level: args.level, userTest: args.userTest,
     } } }, ctx) as { result: { content: { text: string }[] } };
     const exam = JSON.parse(res.result.content[0].text);
-    return rawHandleMcp({ ...msg, params: { ...msg.params, arguments: { ...args, attemptId: exam.attemptId } } }, ctx);
+    return rawHandleMcp({ ...msg, params: { ...msg.params, arguments: { ...args, findings: args.findings ?? JSON.stringify({ findings: [] }), attemptId: exam.attemptId } } }, ctx);
   }
   return rawHandleMcp(body, ctx);
 }

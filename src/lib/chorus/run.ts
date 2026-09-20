@@ -130,7 +130,8 @@ async function runFanoutAndMerge(
   );
   if (!merged.ok) throw new Error(merged.error);
   useChorus.getState().applySynthesis(merged);
-  await runEval();
+  const scored = await runEval();
+  if (!scored) { useChorus.getState().sealGeneration(); return; }
   const after = useChorus.getState().run;
   const gen = after?.generation ?? 1;
   if (gen > 1) {
@@ -141,11 +142,11 @@ async function runFanoutAndMerge(
   toast.success("Generation 1 scored. If the fixture mutated, recurse on the new failures.");
 }
 
-async function runEval() {
+async function runEval(startLevel?: number) {
   const run = useChorus.getState().run;
-  if (!run?.synthesis) return;
-  let scored = await scoreAtLevel(run, run.fixtureLevel ?? 0);
-  if (!scored) return;
+  if (!run?.synthesis) return false;
+  let scored = await scoreAtLevel(run, startLevel ?? run.fixtureLevel ?? 0);
+  if (!scored) return false;
   let hops = 0;
   while (scored.score >= 100 && scored.failed.length === 0 && hops < 3) {
     const current = useChorus.getState().run;
@@ -153,20 +154,32 @@ async function runEval() {
     if (nextLevel > maxFixtureLevel(run.labId)) {
       useChorus.getState().applyEval({ ...scored, exhausted: true });
       toast.success("Public practice ladder completed. Independent validation is still required.");
-      return;
+      return true;
     }
     toast.message("Fixture cleared. Mutating the test.");
     const mutated = await scoreAtLevel(run, nextLevel, true);
-    if (!mutated) return;
+    if (!mutated) return false;
     scored = mutated;
     hops += 1;
   }
   if (scored.score >= 100 && scored.failed.length === 0 && scored.level >= maxFixtureLevel(run.labId)) {
     useChorus.getState().applyEval({ ...scored, exhausted: true });
     toast.success("Public practice ladder completed. Independent validation is still required.");
-    return;
+    return true;
   }
   toast.message(`Fixture v${scored.level + 1}: ${scored.score}/100.`);
+  return true;
+}
+
+/** User-initiated retry of the existing artifact; do not rerun or wipe the swarm. */
+export async function retryEvaluation() {
+  const run = useChorus.getState().run;
+  if (!run?.synthesis || isBusyPhase(run.phase)) return;
+  beginWork();
+  useChorus.getState().beginEvaluation();
+  try { await runEval(run.evaluationErrorLevel); }
+  catch (err) { useChorus.getState().evaluationFailed(err instanceof Error ? err.message : "Evaluation failed."); }
+  finally { useChorus.getState().sealGeneration(); }
 }
 
 async function scoreAtLevel(run: SwarmRun, level: number, mutated = false) {
@@ -182,16 +195,8 @@ async function scoreAtLevel(run: SwarmRun, level: number, mutated = false) {
     evalChat,
   );
   if (!result.ok) {
-    useChorus.getState().applyEval({
-      labId: run.labId ?? "generic",
-      fixture: "unscored",
-      score: 0,
-      passed: [],
-      failed: ["Fixture scorer failed"],
-      evidence: result.error,
-      level,
-    });
-    toast.message("Merge stands. The fixture could not be scored.");
+    useChorus.getState().evaluationFailed(`Level ${level} was not scored: ${result.error}`, level);
+    toast.error("Artifact preserved. Evaluation failed; no zero score was recorded.");
     return null;
   }
   const stamped = stampEval({ ...result, mutated, level });
@@ -323,11 +328,9 @@ export async function scoreBaseline() {
     });
     useChorus.getState().setBaseline({ ...graded, contaminated: true, executor: "MCP host" });
     useChorus.getState().openFixtureSitting({ ...graded, contaminated: true, executor: "MCP host" });
-    toast.message(
-      graded.failed.length
-        ? `Gen 0: ${graded.score}/100. Run the exam in the MCP host to clear plants.`
-        : `Gen 0: ${graded.score}/100 on the fixture.`,
-    );
+    toast.message(graded.submissionStatus === "not_run"
+      ? "Artifact saved, not scored. Run its bound exam in the MCP host."
+      : `Gen 0 checklist: ${graded.score}/100; execution is not verified.`);
     return;
   }
 

@@ -1,4 +1,4 @@
-import { boundedText, INTEGRITY_VERSION, MAX_ARTIFACT, MAX_FINDINGS, MAX_USER_TEST, quarantine } from "./integrity.ts";
+import { boundedText, INTEGRITY_VERSION, MAX_ARTIFACT, MAX_USER_TEST, quarantine } from "./integrity.ts";
 import {
   applyUserTest,
   combineFixtureScore,
@@ -7,6 +7,7 @@ import {
   resolveFixture,
   scoreChecks,
 } from "./fixtures.ts";
+import { FINDINGS_SCHEMA, FINDINGS_INSTRUCTIONS, validateFindings } from "./findings.ts";
 import type { EvalResult } from "./types.ts";
 
 export function examFor(labId?: string, level = 0, userTest?: string) {
@@ -21,6 +22,9 @@ export function examFor(labId?: string, level = 0, userTest?: string) {
     input: fixture.input,
     execute: fixture.execute,
     level,
+    maxLevel: maxFixtureLevel(labId),
+    outputSchema: FINDINGS_SCHEMA,
+    outputInstructions: FINDINGS_INSTRUCTIONS,
     findingsSchema: '{ "findings": [{ "issue": "one line", "quote": "exact line copied from input" }] }',
     note: fixture.execute
       ? "Run exam.input under the artifact. Score with findings JSON. quote must be a verbatim line from input, not from your spec."
@@ -38,7 +42,7 @@ export function gradeArtifact(args: {
 }): EvalResult {
   boundedText(args.deliverable, "artifact", MAX_ARTIFACT, 1);
   if (args.title !== undefined) boundedText(args.title, "title", 2000);
-  if (args.findings !== undefined) boundedText(args.findings, "findings", MAX_FINDINGS);
+  if (args.findings !== undefined) validateFindings(args.findings);
   if (args.userTest !== undefined) boundedText(args.userTest, "userTest", MAX_USER_TEST);
   const max = maxFixtureLevel(args.labId);
   const level = args.level ?? 0;
@@ -99,6 +103,7 @@ export function gradeArtifact(args: {
     executionContext: "unverified-submission",
     labId: fixture.labId,
     fixture: fixture.title,
+    submissionStatus: shouldRun && args.findings === undefined ? "not_run" as const : "scored" as const,
     score,
     passed: platePassed,
     failed: plateFailed,
