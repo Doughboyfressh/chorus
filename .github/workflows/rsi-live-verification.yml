@@ -1,0 +1,51 @@
+name: Production RSI verification
+on:
+  push:
+    branches: [fix/rsi-execution-feedback]
+    paths: [.github/workflows/rsi-live-verification.yml]
+permissions:
+  contents: read
+jobs:
+  deployed-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Wait for the new read-only tool schema
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          const endpoint = `https://chorus-beige-gamma.vercel.app/mcp/${crypto.randomUUID()}`;
+          let ready = false;
+          for (let i = 0; i < 24; i++) {
+            const res = await fetch(endpoint, { method: 'POST', headers: {'content-type':'application/json'},
+              body: JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}}), signal: AbortSignal.timeout(15000) });
+            if (res.ok) {
+              const value = await res.json();
+              const score = value.result?.tools?.find(t => t.name === 'chorus_score');
+              ready = Boolean(score?.inputSchema?.properties?.findings?.description?.includes('format errors'));
+              if (ready) break;
+            }
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          }
+          assert.ok(ready, 'Production has not adopted the repaired findings schema');
+          JS
+      - name: Check production bound exams, retries, swarm, progression and quarantine
+        env:
+          CHORUS_BASE_URL: https://chorus-beige-gamma.vercel.app
+          CHORUS_SMOKE_ALLOW_DISPOSABLE_WRITES: '1'
+          CHORUS_SMOKE_REPORT: evidence/live-result.json
+        run: |
+          mkdir -p evidence
+          node tests/rsi-live-smoke.mjs 2>&1 | tee evidence/live.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rsi-production-${{ github.run_id }}
+          path: evidence/
+          retention-days: 7
