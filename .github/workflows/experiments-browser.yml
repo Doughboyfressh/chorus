@@ -3,13 +3,15 @@ on:
   push:
     branches: [feat/saved-experiments]
     paths: [.github/workflows/experiments-browser.yml, tests/experiments-browser.mjs]
+  pull_request:
+    paths: ['src/components/chorus/experiments.tsx', 'src/lib/chorus/experiments/**', 'tests/experiments-browser.mjs', '.github/workflows/experiments-browser.yml']
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   browser:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
     defaults:
       run:
         shell: bash
@@ -29,19 +31,12 @@ jobs:
           npm run dev > evidence/server.log 2>&1 &
           for i in {1..40}; do if curl -sf http://127.0.0.1:8080/experiments >/dev/null; then break; fi; sleep 1; done
           curl -sf http://127.0.0.1:8080/experiments >/dev/null
-      - name: Prepare browser tools
-        run: |
-          npm install --prefix /tmp/chorus-browser agent-browser --ignore-scripts --no-audit --no-fund
-          /tmp/chorus-browser/node_modules/.bin/agent-browser install --with-deps
-          npx playwright install --with-deps chromium
-      - name: Inspect rendered application with agent-browser
-        run: |
-          /tmp/chorus-browser/node_modules/.bin/agent-browser open http://127.0.0.1:8080/experiments
-          /tmp/chorus-browser/node_modules/.bin/agent-browser snapshot -i > evidence/initial-browser.txt
-          /tmp/chorus-browser/node_modules/.bin/agent-browser screenshot evidence/initial-browser.png
-          /tmp/chorus-browser/node_modules/.bin/agent-browser close
+      - name: Install browser for the locked test dependency
+        run: npx playwright install --with-deps chromium
       - name: Test persistence, cross-device recovery and client run controls
-        run: node --experimental-strip-types tests/experiments-browser.mjs 2>&1 | tee evidence/browser.log
+        run: |
+          node --experimental-strip-types tests/experiments-browser.mjs 2>&1 | tee evidence/browser.log
+          test -s evidence/browser-summary.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
