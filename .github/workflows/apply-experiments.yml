@@ -40,6 +40,9 @@ jobs:
           import base64, gzip, hashlib
           from pathlib import Path
           chunks = [Path(f'.maintenance/experiments-{i}.b64').read_text().strip() for i in range(7)]
+          assert len(chunks[5]) == 6501 and chunks[5][633] == 'O'
+          chunks[5] = chunks[5][:633] + chunks[5][634:]
+          assert hashlib.sha256(chunks[5].encode()).hexdigest() == '61e4ceec0d3eac836b926a68a53b26265554b6e0ea6a48f77c22506797b9c2f9'
           for i, chunk in enumerate(chunks):
               print(i, len(chunk), hashlib.sha256(chunk.encode()).hexdigest())
           data = base64.b64decode(''.join(chunks), validate=True)
