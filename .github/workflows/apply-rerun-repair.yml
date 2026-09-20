@@ -2,7 +2,7 @@ name: Verify rerun repair
 on:
   push:
     branches: [fix/rerun-contract-and-language]
-    paths: ['.maintenance/rerun-*.b64', '.github/workflows/apply-rerun-repair.yml']
+    paths: ['.maintenance/rerun-*', '.github/workflows/apply-rerun-repair.yml']
 permissions:
   contents: write
 jobs:
@@ -34,9 +34,12 @@ jobs:
           patch = lzma.decompress(base64.b64decode(text, validate=True))
           assert hashlib.sha256(patch).hexdigest() == 'eeb1f1e48a52c2cd7e6d70a80dd1944b92e4376de69db5f3586cc91aface53e6'
           Path('/tmp/rerun.patch').write_bytes(patch)
+          assert hashlib.sha256(Path('.maintenance/rerun-types.patch').read_bytes()).hexdigest() == 'd4e9dcd2303efb3f6595feafc39ccbbefde63d76dd9948e6330ab60fac8d25c9'
           PY
           git apply --check /tmp/rerun.patch
           git apply /tmp/rerun.patch
+          git apply --check .maintenance/rerun-types.patch
+          git apply .maintenance/rerun-types.patch
           git diff --check
       - name: Locked dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund 2>&1 | tee evidence/install.log
@@ -58,7 +61,7 @@ jobs:
         run: |
           git config user.name 'Chorus repair automation'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          rm .maintenance/rerun-*.b64
+          rm .maintenance/rerun-*.b64 .maintenance/rerun-types.patch
           git add src tests SECURITY.md .maintenance
           git commit -m 'fix: validate conductor output and repair rerun language handling'
           git push origin HEAD:fix/rerun-contract-and-language
