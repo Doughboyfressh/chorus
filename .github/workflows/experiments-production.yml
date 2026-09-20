@@ -1,0 +1,48 @@
+name: Saved experiments production verification
+on:
+  push:
+    branches: [feat/saved-experiments]
+    paths: [.github/workflows/experiments-production.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    env:
+      CHORUS_BASE_URL: https://chorus-beige-gamma.vercel.app
+      CHORUS_SMOKE_ALLOW_DISPOSABLE_WRITES: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: e7440dba514c074f5fed03510adbd47c33784192
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Wait for the new workspace route
+        run: |
+          mkdir -p evidence
+          for i in {1..30}; do if curl -sf "$CHORUS_BASE_URL/experiments" | grep -q 'Keep the work'; then break; fi; sleep 2; done
+          curl -sf "$CHORUS_BASE_URL/experiments" | grep -q 'Keep the work'
+      - name: Verify production saved storage and access boundaries
+        env:
+          CHORUS_SMOKE_REPORT: evidence/production-experiments.json
+        run: |
+          node tests/experiments-live-smoke.mjs 2>&1 | tee evidence/production-experiments.log
+          test -s evidence/production-experiments.json
+      - name: Verify prior full-artifact, recovery and integrity protections
+        env:
+          CHORUS_SMOKE_REPORT: evidence/production-integrity.json
+        run: |
+          node tests/rsi-live-smoke.mjs 2>&1 | tee evidence/production-integrity.log
+          test -s evidence/production-integrity.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: experiments-production-${{ github.run_id }}
+          path: evidence
+          retention-days: 7
