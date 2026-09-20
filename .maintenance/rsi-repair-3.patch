@@ -1,0 +1,199 @@
+diff --git a/src/components/chorus/compare-plate.tsx b/src/components/chorus/compare-plate.tsx
+index b4d05f8..dfee960 100644
+--- a/src/components/chorus/compare-plate.tsx
++++ b/src/components/chorus/compare-plate.tsx
+@@ -34 +34 @@ function GenColumn({ gen }: { gen: Generation }) {
+-          Practice {gen.evaluation.score}/100 · unverified
++          {gen.evaluation.submissionStatus === "not_run" ? "Not run" : `Practice ${gen.evaluation.score}/100 · unverified`}
+diff --git a/src/components/chorus/composer.tsx b/src/components/chorus/composer.tsx
+index 4ba8bb4..d95b73d 100644
+--- a/src/components/chorus/composer.tsx
++++ b/src/components/chorus/composer.tsx
+@@ -129 +129 @@ export function Composer() {
+-              Gen 0 practice {baseline.score}/100 · unverified
++              Gen 0 {baseline.submissionStatus === "not_run" ? "not run" : `practice ${baseline.score}/100 · unverified`}
+diff --git a/src/components/chorus/synthesis.tsx b/src/components/chorus/synthesis.tsx
+index 6c06c69..6849e30 100644
+--- a/src/components/chorus/synthesis.tsx
++++ b/src/components/chorus/synthesis.tsx
+@@ -6 +6 @@ import { preferencePairs } from "@/lib/chorus/pairs";
+-import { playbookMarkdown, downloadPairs, downloadTraining, recurseSwarm, recurseTarget } from "@/lib/chorus/run";
++import { playbookMarkdown, retryEvaluation, downloadPairs, downloadTraining, recurseSwarm, recurseTarget } from "@/lib/chorus/run";
+@@ -95,0 +96,9 @@ export function Synthesis() {
++      {(snap?.evaluationError ?? run?.evaluationError) ? (
++        <div role="alert" className="mb-4 rounded-xl bg-surface-2 p-4 text-sm text-danger">
++          <p>Evaluation not scored. Your artifact and history are preserved.</p>
++          <p className="mt-2">{snap?.evaluationError ?? run?.evaluationError}</p>
++          <Button className="mt-3" variant="secondary" size="sm" onClick={() => retryEvaluation()} disabled={run?.phase !== "done"}>
++            Retry evaluation only
++          </Button>
++        </div>
++      ) : null}
+@@ -102 +111 @@ export function Synthesis() {
+-          <p className="mt-2 font-display text-2xl leading-tight text-fg">{evaluation.score}/100 · unverified</p>
++          <p className="mt-2 font-display text-2xl leading-tight text-fg">{evaluation.submissionStatus === "not_run" ? "Not run" : `${evaluation.score}/100 · unverified`}</p>
+diff --git a/src/lib/chorus/api.ts b/src/lib/chorus/api.ts
+index 0fc3c78..b3b1692 100644
+--- a/src/lib/chorus/api.ts
++++ b/src/lib/chorus/api.ts
+@@ -19 +19 @@ export const proxyChat = createServerFn({ method: "POST" })
+-    user: boundedText(input.user, "user", 20_000, 1),
++    user: boundedText(input.user, "user", 160_000, 1),
+diff --git a/src/lib/chorus/engine.ts b/src/lib/chorus/engine.ts
+index 36468a0..e047e4a 100644
+--- a/src/lib/chorus/engine.ts
++++ b/src/lib/chorus/engine.ts
+@@ -0,0 +1,2 @@
++import { FindingsValidationError, FINDINGS_INSTRUCTIONS } from "./findings.ts";
++import { completeObject } from "./artifact-text.ts";
+@@ -35 +37 @@ export async function conductSwarm(
+-      ? `\nThe user already has this artifact (fixture ${extra.baseline.score}/100, failing: ${extra.baseline.failed.join("; ") || "none"}). Improve THIS. Do not start from a blank page.\n---\n${extra.pasted.slice(0, 1800)}\n---`
++      ? `\nThe user already has this artifact (fixture ${extra.baseline.score}/100, failing: ${extra.baseline.failed.join("; ") || "none"}). Improve THIS. Do not start from a blank page.\n---\n${boundedText(extra.pasted, "artifact", MAX_ARTIFACT, 1)}\n---`
+@@ -37 +39 @@ export async function conductSwarm(
+-        ? `\nThe user already has this artifact. Improve THIS.\n---\n${extra.pasted.slice(0, 1800)}\n---`
++        ? `\nThe user already has this artifact. Improve THIS.\n---\n${boundedText(extra.pasted, "artifact", MAX_ARTIFACT, 1)}\n---`
+@@ -277 +279 @@ Return JSON:
+-    const parsed = extractJson<Record<string, unknown>>(result.text);
++    const parsed = completeObject(result.text);
+@@ -282 +284 @@ Return JSON:
+-      deliverable: asString(parsed.deliverable, "The swarm did not produce a merge."),
++      deliverable: boundedText(parsed.deliverable, "artifact", MAX_ARTIFACT, 8),
+@@ -292,14 +294,2 @@ Return JSON:
+-  } catch {
+-    return {
+-      ok: true,
+-      title: "Draft merge",
+-      deliverable: result.text.slice(0, 1800) || "The swarm did not produce a merge.",
+-      steps: [],
+-      watchouts: ["Synthesizer JSON was truncated. Treat this merge as a draft."],
+-      pattern: {
+-        contract: data.contract,
+-        fanout: data.whyThisSplit,
+-        critique: data.critique.verdict,
+-        merge: "Fallback merge from unreadable JSON.",
+-      },
+-    };
++  } catch (err) {
++    return { ok: false, error: err instanceof Error ? err.message : "Synthesizer did not return a complete artifact." };
+@@ -565 +555 @@ export async function evaluateArtifact(
+-        `\n\nReturn JSON only: { "findings": [{ "issue": "one line", "quote": "exact source line" }] }.`,
++        `\n\n${FINDINGS_INSTRUCTIONS}`,
+@@ -569,10 +559 @@ export async function evaluateArtifact(
+-    if (!executed.ok) {
+-      const graded = gradeArtifact({
+-        labId: data.labId,
+-        title: data.title,
+-        deliverable: data.deliverable,
+-        userTest: data.userTest,
+-        level,
+-      });
+-      return { ok: true, ...graded, evidence: `Practice execution failed (${executed.error}). No execution credit.` };
+-    }
++    if (!executed.ok) return { ok: false, error: `Practice execution failed: ${executed.error}. No score was recorded.` };
+@@ -579,0 +561 @@ export async function evaluateArtifact(
++  try {
+@@ -590,0 +573,4 @@ export async function evaluateArtifact(
++  } catch (err) {
++    if (err instanceof FindingsValidationError) return { ok: false, error: err.message };
++    throw err;
++  }
+diff --git a/src/lib/chorus/run.ts b/src/lib/chorus/run.ts
+index fbd6d49..84c0c07 100644
+--- a/src/lib/chorus/run.ts
++++ b/src/lib/chorus/run.ts
+@@ -133 +133,2 @@ async function runFanoutAndMerge(
+-  await runEval();
++  const scored = await runEval();
++  if (!scored) { useChorus.getState().sealGeneration(); return; }
+@@ -144 +145 @@ async function runFanoutAndMerge(
+-async function runEval() {
++async function runEval(startLevel?: number) {
+@@ -146,3 +147,3 @@ async function runEval() {
+-  if (!run?.synthesis) return;
+-  let scored = await scoreAtLevel(run, run.fixtureLevel ?? 0);
+-  if (!scored) return;
++  if (!run?.synthesis) return false;
++  let scored = await scoreAtLevel(run, startLevel ?? run.fixtureLevel ?? 0);
++  if (!scored) return false;
+@@ -156 +157 @@ async function runEval() {
+-      return;
++      return true;
+@@ -160 +161 @@ async function runEval() {
+-    if (!mutated) return;
++    if (!mutated) return false;
+@@ -167 +168 @@ async function runEval() {
+-    return;
++    return true;
+@@ -169,0 +171,12 @@ async function runEval() {
++  return true;
++}
++
++/** User-initiated retry of the existing artifact; do not rerun or wipe the swarm. */
++export async function retryEvaluation() {
++  const run = useChorus.getState().run;
++  if (!run?.synthesis || isBusyPhase(run.phase)) return;
++  beginWork();
++  useChorus.getState().beginEvaluation();
++  try { await runEval(run.evaluationErrorLevel); }
++  catch (err) { useChorus.getState().evaluationFailed(err instanceof Error ? err.message : "Evaluation failed."); }
++  finally { useChorus.getState().sealGeneration(); }
+@@ -185,10 +198,2 @@ async function scoreAtLevel(run: SwarmRun, level: number, mutated = false) {
+-    useChorus.getState().applyEval({
+-      labId: run.labId ?? "generic",
+-      fixture: "unscored",
+-      score: 0,
+-      passed: [],
+-      failed: ["Fixture scorer failed"],
+-      evidence: result.error,
+-      level,
+-    });
+-    toast.message("Merge stands. The fixture could not be scored.");
++    useChorus.getState().evaluationFailed(`Level ${level} was not scored: ${result.error}`, level);
++    toast.error("Artifact preserved. Evaluation failed; no zero score was recorded.");
+@@ -326,5 +331,3 @@ export async function scoreBaseline() {
+-    toast.message(
+-      graded.failed.length
+-        ? `Gen 0: ${graded.score}/100. Run the exam in the MCP host to clear plants.`
+-        : `Gen 0: ${graded.score}/100 on the fixture.`,
+-    );
++    toast.message(graded.submissionStatus === "not_run"
++      ? "Artifact saved, not scored. Run its bound exam in the MCP host."
++      : `Gen 0 checklist: ${graded.score}/100; execution is not verified.`);
+diff --git a/src/lib/chorus/store.ts b/src/lib/chorus/store.ts
+index 57e0d20..88bf1e8 100644
+--- a/src/lib/chorus/store.ts
++++ b/src/lib/chorus/store.ts
+@@ -343,0 +344,2 @@ type Store = {
++  evaluationFailed: (error: string, level?: number) => void;
++  beginEvaluation: () => void;
+@@ -604,0 +607,12 @@ export const useChorus = create<Store>((set, get) => ({
++  beginEvaluation: () => {
++    const run = get().run;
++    if (run) set({ run: { ...run, phase: "eval" } });
++  },
++  evaluationFailed: (error, level) => {
++    const run = get().run;
++    if (!run) return;
++    const next: SwarmRun = { ...run, evaluationError: error, evaluationErrorLevel: level,
++      generations: run.generations.map(g => g.n === run.generation ? { ...g, evaluationError: error, evaluationErrorLevel: level } : g) };
++    persistNow(next);
++    set({ run: next });
++  },
+@@ -610 +624 @@ export const useChorus = create<Store>((set, get) => ({
+-      g.n === generation ? { ...g, evaluation } : g,
++      g.n === generation ? { ...g, evaluation, evaluationError: undefined, evaluationErrorLevel: undefined } : g,
+@@ -614,0 +629,2 @@ export const useChorus = create<Store>((set, get) => ({
++      evaluationError: undefined,
++      evaluationErrorLevel: undefined,
+diff --git a/src/lib/chorus/types.ts b/src/lib/chorus/types.ts
+index bb5bea2..e20d438 100644
+--- a/src/lib/chorus/types.ts
++++ b/src/lib/chorus/types.ts
+@@ -113,0 +114 @@ export type EvalResult = {
++  submissionStatus?: "not_run" | "scored";
+@@ -134,0 +136,2 @@ export type Generation = {
++  evaluationError?: string;
++  evaluationErrorLevel?: number;
+@@ -160,0 +164,2 @@ export type SwarmRun = {
++  evaluationError?: string;
++  evaluationErrorLevel?: number;
