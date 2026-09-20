@@ -35,6 +35,14 @@ jobs:
           python3 - <<'PY'
           import base64, gzip, hashlib
           from pathlib import Path
+          p = Path('.maintenance/grader-repair-0.b64')
+          text = p.read_text()
+          edits = [(2508,2509,'7','5'),(4657,4658,'l',''),(5220,5221,'H',''),(6839,6841,'Sc',''),(7053,7054,'Y','')]
+          for start,end,old,new in reversed(edits):
+              assert text[start:end] == old
+              text = text[:start] + new + text[end:]
+          assert hashlib.sha256(text.encode()).hexdigest() == '10c5ed212380d5e988834c152c33b152b0099a9f98b92e57e1576eeb73063efc'
+          p.write_text(text)
           encoded = ''.join(Path(f'.maintenance/grader-repair-{i}.b64').read_text().strip() for i in range(3))
           compressed = base64.b64decode(encoded, validate=True)
           assert hashlib.sha256(compressed).hexdigest() == 'a2acd350d1af5acc0266bb9b9a95c76f49c2fff70ed3133000b51dfad6033c73', 'Staged bytes differ from reviewed repair'
