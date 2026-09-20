@@ -6,6 +6,7 @@ import { ChorusMark } from "./mark";
 import { cn } from "@/lib/utils";
 
 const NAV = [
+  { to: "/experiments" as const, label: "Experiments", id: "experiments" as const },
   { to: "/lab" as const, label: "Lab", id: "lab" as const },
   { to: "/glossary" as const, label: "Lexicon", id: "glossary" as const },
   { to: "/pricing" as const, label: "Pricing", id: "pricing" as const },
@@ -31,7 +32,7 @@ export function SiteHeader({
   active,
   aside,
 }: {
-  active?: "lab" | "pricing" | "home" | "glossary";
+  active?: "lab" | "pricing" | "home" | "glossary" | "experiments";
   aside?: ReactNode;
 }) {
   return (
@@ -47,7 +48,7 @@ export function SiteHeader({
               </span>
             </span>
           </Link>
-          <nav className="flex items-center gap-1">
+          <nav className="flex flex-wrap items-center gap-1">
             {NAV.map((item) => (
               <Link
                 key={item.to}

@@ -178,3 +178,17 @@ contaminated. Clean DPO/SFT export is still locked.
 Regression verification is synthetic. Passing all 22 lab/level reference cases
 in tests does NOT mean a model has run those labs, completed every generation,
 or improved on independent work. Keep all historical failures and receipts.
+
+
+## Saved experiments and controlled comparisons
+
+`/experiments` adds capability-protected saved vaults, durable checkpoint history
+and an operator-controlled public Prompt A/B pilot. See EXPERIMENTS.md for the
+access, retention, budget, retry and evaluator boundaries. This is separate from
+clean-training certification: that remains locked. Full future findings are
+retained rather than silently previewed at 500 characters. Historical truncation
+is not backfilled. Pinned MCP sittings are exempt from temporary retention;
+explicit live resets do not delete their saved checkpoints. Vault recovery keys
+are hashed at rest, never put in URLs, and do not replace existing MCP sitting
+capabilities. Paid execution requires separate operator authorization and explicit
+server-side provider/budget configuration, and is disabled by default.

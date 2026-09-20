@@ -20,7 +20,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test:integrity:db": "node --experimental-strip-types --test tests/chorus-storage.test.ts",
-    "test:fixtures": "node --experimental-strip-types --test tests/prompt-fixture.test.mjs"
+    "test:fixtures": "node --experimental-strip-types --test tests/prompt-fixture.test.mjs",
+    "test:experiments": "node --experimental-strip-types --test src/lib/chorus/experiments.test.ts tests/experiments-storage.test.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
