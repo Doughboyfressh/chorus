@@ -25,10 +25,12 @@ try {
  const artifact='Require exact evidence and record uncertainty.\n'.repeat(210)+'FINAL_RELEASE_CHECK_RULE';
  await mcp(child.sittingId,'chorus_sitting',{contract:artifact,merge:artifact});
  const after=await api('detail',{experimentId:exp.id},vault.key);assert.ok(after.checkpoints.length>1);
- const full=await api('checkpoint',{experimentId:exp.id,checkpointId:after.checkpoints.at(-1).id},vault.key);
+ const checkpointId=after.checkpoints.at(-1).id;
+ const full=await api('checkpoint',{experimentId:exp.id,checkpointId},vault.key);
  assert.equal(full.payload.merge,artifact);assert.ok(!('lock' in full.payload));assert.match(full.sha256,/^[a-f0-9]{64}$/);pass('Confirmed MCP changes retain the full long artifact and immutable earlier checkpoint');
  const other=await api('child',{experimentId:exp.id,labId:'rsi'},vault.key,201);sittings.push(other.sittingId);
- const prior=await mcp(child.sittingId,'chorus_sitting');assert.ok(JSON.stringify(prior).includes('FINAL_RELEASE_CHECK_RULE'));pass('A different lab gets a separate child sitting without wiping prior work');
+ const prior=await mcp(child.sittingId,'chorus_sitting');assert.equal(prior.id,child.sittingId);assert.equal(prior.labId,'prompt');assert.equal(prior.contract,true);
+ assert.equal((await api('checkpoint',{experimentId:exp.id,checkpointId},vault.key)).payload.merge,artifact);pass('A different lab gets a separate child sitting without wiping prior work');
  await api('save_client',{experimentId:exp.id,snapshot:{synthesis:{deliverable:artifact},apiKey:'should-be-redacted'}},vault.key);
  const latest=await api('detail',{experimentId:exp.id},vault.key);const saved=await api('checkpoint',{experimentId:exp.id,checkpointId:latest.checkpoints.at(-1).id},vault.key);
  assert.equal(saved.provenance,'client_supplied_unverified');assert.ok(!JSON.stringify(saved).includes('should-be-redacted'));pass('Client snapshots preserve output while redacting known credential fields and labeling provenance');
