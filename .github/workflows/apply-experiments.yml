@@ -2,7 +2,7 @@ name: Verify saved experiments
 on:
   push:
     branches: [feat/saved-experiments]
-    paths: [.github/workflows/apply-experiments.yml, '.maintenance/experiments*']
+    paths: [.github/workflows/apply-experiments.yml, '.maintenance/experiments*', .maintenance/finalize-experiments.py]
   workflow_dispatch:
 permissions:
   contents: write
@@ -43,8 +43,6 @@ jobs:
           assert len(chunks[5]) == 6501 and chunks[5][633] == 'O'
           chunks[5] = chunks[5][:633] + chunks[5][634:]
           assert hashlib.sha256(chunks[5].encode()).hexdigest() == '61e4ceec0d3eac836b926a68a53b26265554b6e0ea6a48f77c22506797b9c2f9'
-          for i, chunk in enumerate(chunks):
-              print(i, len(chunk), hashlib.sha256(chunk.encode()).hexdigest())
           data = base64.b64decode(''.join(chunks), validate=True)
           assert hashlib.sha256(data).hexdigest() == 'd3fee9fdc57e4ed433734bd53c02ec5c4194cff43d132843e39db6c256f61db3', 'Staged bytes differ'
           patch = gzip.decompress(data)
@@ -53,6 +51,7 @@ jobs:
           PY
           git apply --check /tmp/experiments.patch
           git apply /tmp/experiments.patch
+          python3 .maintenance/finalize-experiments.py
           git diff --check
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund 2>&1 | tee evidence/install.log
@@ -74,7 +73,7 @@ jobs:
         run: |
           git config user.name 'Doughboyfressh'
           git config user.email 'Doughboyfressh@users.noreply.github.com'
-          rm .maintenance/experiments-*.b64
+          rm .maintenance/experiments-*.b64 .maintenance/finalize-experiments.py
           git add src tests migrations package.json vite.config.ts EXPERIMENTS.md SECURITY.md .maintenance
           git commit -m 'feat: durable experiments and budgeted Prompt comparison receipts'
           git push origin HEAD:feat/saved-experiments
