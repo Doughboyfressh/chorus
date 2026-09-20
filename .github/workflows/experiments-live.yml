@@ -2,13 +2,16 @@ name: Saved workspace deployed verification
 on:
   push:
     branches: [feat/saved-experiments]
-    paths: [.github/workflows/experiments-live.yml]
+    paths: [.github/workflows/experiments-live.yml, tests/experiments-live-smoke.mjs]
 permissions:
   contents: read
 jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,6 +27,7 @@ jobs:
         run: |
           mkdir -p evidence
           node tests/experiments-live-smoke.mjs 2>&1 | tee evidence/preview.log
+          test -s evidence/preview.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
