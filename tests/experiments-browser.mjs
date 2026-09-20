@@ -8,11 +8,12 @@ assert.ok(new URL(base).hostname==='127.0.0.1','Browser mutation tests are local
 const out=process.env.CHORUS_BROWSER_EVIDENCE||'evidence';await mkdir(out,{recursive:true});
 const browser=await chromium.launch({headless:true});
 const passed=[];const pass=s=>{passed.push(s);console.log('PASS:',s);};
-const errors=[];
+const errors=[];let inspectPage;
+async function visit(page){const ready=page.waitForResponse(r=>r.url()===base+'/api/experiments'&&r.request().method()==='GET');await page.goto(base+'/experiments');const r=await ready;assert.equal(r.status(),200,await r.text());await page.waitForLoadState('networkidle');}
 try {
- const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
+ const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();inspectPage=page;
  page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>void d.accept());
- await page.goto(base+'/experiments');await page.getByRole('button',{name:'Create private vault',exact:true}).click();
+ await visit(page);await page.getByRole('button',{name:'Create private vault',exact:true}).click();
  await page.getByText('Vault unlocked on this browser',{exact:true}).waitFor();
  const recovery=await page.evaluate(()=>localStorage.getItem('chorus.experiment.vault.v1'));assert.match(recovery,/^cv_[a-f0-9]{64}$/);
  await page.getByLabel('Name',{exact:true}).fill('Browser persistence check');
@@ -27,7 +28,7 @@ try {
  const response=await page.evaluate(async({sit,full})=>{
   const r=await fetch(`/mcp/${sit}`,{method:'POST',headers:{'content-type':'application/json',accept:'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'chorus_sitting',arguments:{contract:full,merge:full}}})});return r.json();
  },{sit,full});assert.ok(!response.error&&!response.result?.isError);
- await page.goto(base+'/experiments');await page.getByRole('button',{name:/Browser persistence check/}).click();
+ await visit(page);await page.getByRole('button',{name:/Browser persistence check/}).click();
  await page.getByText(/Recorded checkpoints/).click();await page.getByRole('button',{name:/Host checkpoint/}).last().click();
  await page.getByRole('button',{name:'Use artifact as baseline',exact:true}).click();assert.equal(await page.getByLabel('Original artifact').inputValue(),full);
  const exported=page.waitForEvent('download');await page.getByRole('button',{name:'Export complete experiment',exact:true}).click();
@@ -38,17 +39,17 @@ try {
  assert.equal(await page.getByRole('button',{name:/Freeze comparison plan/}).isDisabled(),true);await page.getByLabel('Original artifact').fill(full);
  pass('Over-limit prompts are not silently truncated by the browser');
  await page.screenshot({path:out+'/experiments-desktop.png',fullPage:true});
- const mobile=await browser.newContext({viewport:{width:390,height:844},isMobile:true}),second=await mobile.newPage();
- second.on('pageerror',e=>errors.push(e.message));await second.goto(base+'/experiments');
+ const mobile=await browser.newContext({viewport:{width:390,height:844},isMobile:true}),second=await mobile.newPage();inspectPage=second;
+ second.on('pageerror',e=>errors.push(e.message));await visit(second);
  await second.getByLabel('Restore with recovery key').fill(recovery);await second.getByRole('button',{name:'Unlock saved experiments',exact:true}).click();
  await second.getByRole('button',{name:/Browser persistence check/}).click();await second.getByText(/Recorded checkpoints/).click();
- await second.getByRole('button',{name:/Host checkpoint/}).last().click();assert.ok((await second.textContent('body')).includes('FINAL_RULE_PRESERVED'));
+ await second.getByRole('button',{name:/Host checkpoint/}).last().click();await second.waitForFunction(()=>document.body.textContent.includes('FINAL_RULE_PRESERVED'));
  assert.equal(await second.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
  await second.screenshot({path:out+'/experiments-mobile.png',fullPage:true});
  pass('A separate mobile browser restores the vault and complete saved checkpoint without overflow');
  // Client orchestration checks use a mocked API only. Real SQL/runner execution is tested separately.
  const policy={model:'synthetic-ui-model',outputTokens:1200,inputUsdPerMillion:1,outputUsdPerMillion:2,dailyUsd:5,timeoutMs:40000};
- let comparison;let seen=[];let release;let paused=false;
+ let comparison;let seen=[];let release;let paused=false;inspectPage=page;
  await context.route('**/api/experiments',async route=>{
   const request=route.request();if(request.method()==='GET')return route.fulfill({json:{runner:{ready:true,policy},publicPilot:true}});
   const a=request.postDataJSON();
@@ -65,7 +66,7 @@ try {
   } else if(a.action!=='results')return route.continue();
   return route.fulfill({json:{...comparison,report:comparisonReport(comparison.trials,comparison.plan.maxCalls)}});
  });
- await page.reload();await page.getByRole('button',{name:/Browser persistence check/}).click();
+ await visit(page);await page.getByRole('button',{name:/Browser persistence check/}).click();
  await page.getByLabel('Original artifact').fill('Review the supplied source.');await page.getByLabel('Revised artifact').fill('Trace visible source-to-sink paths and acknowledge missing context.');
  await page.getByLabel('What should this change improve?').fill('Reduce unsupported findings without increasing missed vulnerabilities.');
  await page.getByLabel('Operator execution key').fill('synthetic-operator-not-a-provider-secret');
@@ -83,4 +84,4 @@ try {
  pass('Mocked client run prevents duplicate starts, pauses after the active call and stops on invalid output');
  assert.deepEqual(errors,[]);pass('No browser runtime errors were observed');
  await writeFile(out+'/browser-summary.json',JSON.stringify({status:'PASS',passed,realModelCalls:0,storageApi:'real isolated development database',clientRunnerApi:'mocked explicitly'},null,2));
-} finally {await browser.close();}
+} catch(e){if(inspectPage){await inspectPage.screenshot({path:out+'/failure.png',fullPage:true});await writeFile(out+'/failure.txt',(await inspectPage.textContent('body'))+'\n'+JSON.stringify(errors));}throw e;} finally {await browser.close();}
