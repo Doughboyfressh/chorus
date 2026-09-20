@@ -1,0 +1,38 @@
+name: Rerun repair production verification
+on:
+  push:
+    branches: [fix/rerun-contract-and-language]
+    paths: ['.github/workflows/rerun-production-check.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        shell: bash
+    env:
+      CHORUS_BASE_URL: https://chorus-beige-gamma.vercel.app
+      CHORUS_SMOKE_ALLOW_DISPOSABLE_WRITES: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ddbf1f39550c4aae79ae10441c48aaba3deeccd3
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Production grading and conductor recovery
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/source-commit.txt
+          CHORUS_SMOKE_REPORT=evidence/grading.json node tests/grading-live-smoke.mjs 2>&1 | tee evidence/grading.log
+      - name: Existing full-swarm and execution integrity
+        run: CHORUS_SMOKE_REPORT=evidence/swarm.json node tests/rsi-live-smoke.mjs 2>&1 | tee evidence/swarm.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rerun-production-${{ github.run_id }}
+          path: evidence
+          retention-days: 7
