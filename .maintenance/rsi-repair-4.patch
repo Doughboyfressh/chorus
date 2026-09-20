@@ -1,0 +1,70 @@
+diff --git a/SECURITY.md b/SECURITY.md
+index 61f5d31..e37510f 100644
+--- a/SECURITY.md
++++ b/SECURITY.md
+@@ -75,2 +75,2 @@ against a compromised server administrator.
+-Run `npm ci --ignore-scripts`, then `npm test`, `npm run typecheck`, and
+-`npm run build:dev`. The test command includes new scoring/transport/provenance
++Run `npm ci --ignore-scripts`, then `npm test`, `npm run build:dev`, and
++`npm run typecheck` (the build generates router types). The test command includes new scoring/transport/provenance
+@@ -101,0 +102,30 @@ a plausible-looking signature.
++
++
++## RSI execution and feedback repair (server 2.1.0)
++
++- Malformed findings are `INVALID_FINDINGS` tool errors with a field path and
++  expected JSON schema, never performance scores. Validation precedes attempt
++  consumption, seat advancement and score recording. Correct formatting using
++  the real output and retry the same unused attempt before expiry; changing the
++  artifact still requires a new bound attempt. Never invent evidence to adapt a
++  native reviewer schema. An explicit `{"findings":[]}` is a valid no-findings
++  result and may score zero. Invalid or unexecuted output must not be advertised
++  as an observed zero.
++- Full bounded artifacts survive the conductor seed, specialist patches,
++  synthesizer envelope, recursive context and exam prompt. Bounds remain 24,000
++  artifact characters and 32,000 findings characters. Completion envelopes can
++  be larger to accommodate JSON escaping. Oversize/incomplete artifacts are
++  errors, not silently shortened or auto-repaired drafts. The exam seat returns
++  the exact frozen artifact and character count for inspection.
++- A full pass still advances automatically without clearing the sitting. The
++  response exposes currentLevel, lastScoredLevel, maxLevel, capped and exhausted.
++  RSI has levels 0 through 3; no fabricated 0-through-6 ladder. Omitting level
++  uses the current level. Changing labs or bypassing progression still requires
++  an explicit reset; reaching a cap is never automatic permission to wipe data.
++- Browser evaluation failures retain the artifact, show an unscored error and
++  offer a user-initiated evaluation-only retry. They do not manufacture a zero
++  or announce a completed score. Provider failures are errors too.
++- These are diagnostic workflow repairs. The trusted private-holdout evaluator
++  described above is still absent; clean training export stays locked. Existing
++  ledgers are not regraded, reset or rewritten by this release. No new database
++  migration or provider configuration is required.
+diff --git a/src/lib/chorus/integrity.test.ts b/src/lib/chorus/integrity.test.ts
+index 13ace43..3a68331 100644
+--- a/src/lib/chorus/integrity.test.ts
++++ b/src/lib/chorus/integrity.test.ts
+@@ -28 +28 @@ const pairArgs = () => ({ prompt: "review", rejected: "Always say the code is sa
+-  previous: grade(), current: grade(good), model: "claimed-model", generation: 2 });
++  previous: grade('{"findings":[]}'), current: grade(good), model: "claimed-model", generation: 2 });
+@@ -33 +33 @@ describe("score inflation regressions", () => {
+-    assert.equal(grade(findings).score, 0);
++    assert.throws(() => grade(findings), /exact source line/);
+@@ -35 +35 @@ describe("score inflation regressions", () => {
+-  it("rejects a non-JSON keyword/source dump", () => assert.equal(grade("xss sql code execution\n" + source).score, 0));
++  it("rejects a non-JSON keyword/source dump", () => assert.throws(() => grade("xss sql code execution\n" + source), /invalid or incomplete JSON/));
+@@ -47 +47 @@ describe("score inflation regressions", () => {
+-    for (const quote of [xssLine.toUpperCase(), "prefix " + xssLine, source, "req.query.name"]) {
++    for (const quote of [xssLine.toUpperCase(), "prefix " + xssLine, "req.query.name"]) {
+@@ -63 +63,2 @@ describe("score inflation regressions", () => {
+-    const result = gradeArtifact({ labId: "generic", deliverable: "must test prompt stop", userTest: "Compute a valid proof", findings: "nonsense" });
++    assert.throws(() => gradeArtifact({ labId: "generic", deliverable: "must test prompt stop", userTest: "Compute a valid proof", findings: "nonsense" }), /invalid or incomplete JSON/);
++    const result = gradeArtifact({ labId: "generic", deliverable: "must test prompt stop", userTest: "Compute a valid proof", findings: '{"findings":[]}' });
+@@ -134 +135 @@ describe("exam binding and one-time consumption", () => {
+-    assert.equal((await call("pinned", "chorus_score", { labId: "prompt", level: 1, artifact, attemptId: exam.attemptId })).score, 0);
++    assert.equal((await call("pinned", "chorus_score", { labId: "prompt", level: 1, artifact, attemptId: exam.attemptId, findings: '{"findings":[]}' })).score, 0);
+diff --git a/src/lib/chorus/mcp.test.ts b/src/lib/chorus/mcp.test.ts
+index c2fcccb..aa6a27c 100644
+--- a/src/lib/chorus/mcp.test.ts
++++ b/src/lib/chorus/mcp.test.ts
+@@ -17 +17 @@ async function handleMcp(body: Parameters<typeof rawHandleMcp>[0], ctx: Paramete
+-    return rawHandleMcp({ ...msg, params: { ...msg.params, arguments: { ...args, attemptId: exam.attemptId } } }, ctx);
++    return rawHandleMcp({ ...msg, params: { ...msg.params, arguments: { ...args, findings: args.findings ?? JSON.stringify({ findings: [] }), attemptId: exam.attemptId } } }, ctx);
